@@ -49,17 +49,18 @@
 ## Phase 1: Supabase 연동 (인증 + 데이터)
 
 ### 1-1. Supabase 프로젝트 설정
-- [ ] Supabase 프로젝트 생성
-- [ ] `@supabase/supabase-js` 패키지 설치
-- [ ] 환경변수 설정 (`VITE_SUPABASE_URL`, `VITE_SUPABASE_ANON_KEY`)
-- [ ] Supabase 클라이언트 초기화 (`src/supabaseClient.js`)
+- [x] Supabase 프로젝트 생성
+- [x] `@supabase/supabase-js` 패키지 설치
+- [x] 환경변수 설정 (`VITE_SUPABASE_URL`, `VITE_SUPABASE_ANON_KEY`)
+- [x] Supabase 클라이언트 초기화 (`src/supabaseClient.js`)
+- [x] GitHub Actions에 환경변수 주입 (deploy.yml)
 
 ### 1-2. Magic Link 인증 연동
-- [ ] `AuthPage`의 `handleSend`에서 `supabase.auth.signInWithOtp({ email })` 호출
-- [ ] "인증 완료 (목업)" 버튼 제거
-- [ ] `onAuthStateChange` 리스너로 세션 감지 → 자동 로그인
-- [ ] 리다이렉트 URL 설정 (이메일 인증 후 앱으로 복귀)
-- [ ] 로그아웃 시 `supabase.auth.signOut()` 호출
+- [x] `AuthPage`의 `handleSend`에서 `supabase.auth.signInWithOtp({ email })` 호출
+- [x] "인증 완료 (목업)" 버튼 제거
+- [x] `onAuthStateChange` 리스너로 세션 감지 → 자동 로그인
+- [x] 리다이렉트 URL 설정 (이메일 인증 후 앱으로 복귀)
+- [x] 로그아웃 시 `supabase.auth.signOut()` 호출
 
 ### 1-3. DB 테이블 설계
 
@@ -145,14 +146,14 @@ notifications
   created_at  timestamptz
 ```
 
-- [ ] Supabase에 테이블 생성
+- [x] Supabase에 테이블 생성 (todos, events, coupons, family_settings)
 - [ ] RLS(Row Level Security) 정책 설정 (가족 단위 접근 제어)
-- [ ] 기존 useState 데이터를 Supabase CRUD로 교체
-  - [ ] events: 조회/추가/삭제
-  - [ ] todos: 조회/추가/완료 토글/삭제
+- [x] 기존 useState 데이터를 Supabase CRUD로 교체
+  - [x] events: 조회/추가/삭제
+  - [x] todos: 조회/추가/완료 토글/삭제/수정
   - [ ] profiles: 조회/수정
   - [ ] family_members: 조회/추가/삭제
-  - [ ] coupons: 조회/추가/삭제
+  - [x] coupons: 조회/추가/삭제
   - [ ] coupon_usage: 사용 기록/조회
 
 ### 1-4. 가족 초대 기능
