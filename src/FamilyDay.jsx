@@ -1,4 +1,5 @@
 import React, { useState, useEffect, useCallback, useRef, useMemo } from "react";
+import { supabase } from "./supabaseClient";
 
 /* ─── colour tokens ─── */
 const C = {
@@ -1742,34 +1743,73 @@ function MyPage({ user, onUpdate, onLogout, onCouponManage }){
    ══════════════════════════════════════ */
 export default function FamilyDay() {
   const [calTab,setCalTab]=useState("monthly");
-  const [todos,setTodos]=useState(()=>{
-    const todayKey=fmtDateKey(new Date());
-    const curWeekStart=fmtDateKey(getWeekStartDate(new Date()));
-    // 주 시작일 기준으로 리셋 판단
-    const stored=INITIAL_TODOS;
-    const weeklyTemplates=stored.filter(t=>t.isWeekly);
-    const thisWeekTodos=stored.filter(t=>{
-      const todoWeekStart=fmtDateKey(getWeekStartDate(new Date(t.createdDate+"T00:00:00")));
-      return todoWeekStart===curWeekStart;
-    });
-    // 이번 주에 해당하는 할 일이 없으면 주간 반복 할 일만 재생성
-    if(thisWeekTodos.length===0&&weeklyTemplates.length>0){
-      return weeklyTemplates.map(t=>({...t,id:uid(),isDone:false,createdDate:todayKey}));
-    }
-    return stored;
-  });
+  const [todos,setTodos]=useState([]);
   const [showModal,setShowModal]=useState(false);
   const [editingTodo,setEditingTodo]=useState(null);
   const [showCoupon,setShowCoupon]=useState(false);
   const [showCouponManage,setShowCouponManage]=useState(false);
-  const [coupons,setCoupons]=useState(INITIAL_COUPONS);
-  const [stars,setStars]=useState(23);
+  const [coupons,setCoupons]=useState([]);
+  const [stars,setStars]=useState(0);
   const [navTab,setNavTab]=useState("home");
   const [mounted,setMounted]=useState(false);
-  const [events,setEvents]=useState(SAMPLE_EVENTS);
+  const [events,setEvents]=useState([]);
   const [user,setUser]=useState(()=>{try{const s=localStorage.getItem("fd_user");return s?JSON.parse(s):null;}catch{return null;}});
+  const [dbLoaded,setDbLoaded]=useState(false);
 
-  const addEvent=useCallback(ev=>setEvents(p=>[...p,ev]),[]);
+  /* ── Supabase: 초기 데이터 로드 ── */
+  useEffect(()=>{
+    async function loadAll(){
+      const [todosRes,eventsRes,couponsRes,settingsRes]=await Promise.all([
+        supabase.from("todos").select("*"),
+        supabase.from("events").select("*"),
+        supabase.from("coupons").select("*"),
+        supabase.from("family_settings").select("*").eq("id",1).single(),
+      ]);
+      if(todosRes.data){
+        const mapped=todosRes.data.map(r=>({id:r.id,text:r.text,owner:r.owner,isDone:r.is_done,starReward:r.star_reward,createdDate:r.created_date,isWeekly:r.is_weekly,doneDate:r.done_date||undefined}));
+        // 주간 리셋 로직
+        const todayKey=fmtDateKey(new Date());
+        const curWeekStart=fmtDateKey(getWeekStartDate(new Date()));
+        const weeklyTemplates=mapped.filter(t=>t.isWeekly);
+        const thisWeekTodos=mapped.filter(t=>{
+          const todoWeekStart=fmtDateKey(getWeekStartDate(new Date(t.createdDate+"T00:00:00")));
+          return todoWeekStart===curWeekStart;
+        });
+        if(thisWeekTodos.length===0&&weeklyTemplates.length>0){
+          const newTodos=weeklyTemplates.map(t=>({...t,id:uid(),isDone:false,createdDate:todayKey}));
+          setTodos(newTodos);
+          // DB에도 새 주간 할 일 저장
+          for(const t of newTodos){
+            supabase.from("todos").insert({id:t.id,text:t.text,owner:t.owner,is_done:false,star_reward:t.starReward,created_date:t.createdDate,is_weekly:t.isWeekly}).then(()=>{});
+          }
+        } else {
+          setTodos(mapped);
+        }
+      }
+      if(eventsRes.data){
+        setEvents(eventsRes.data.map(r=>({id:r.id,title:r.title,date:r.date,startHour:r.start_hour,startMin:r.start_min,endHour:r.end_hour,endMin:r.end_min,color:r.color,emoji:r.emoji})));
+      }
+      if(couponsRes.data){
+        setCoupons(couponsRes.data.map(r=>({id:r.id,starCost:r.star_cost,title:r.title,desc:r.description,emoji:r.emoji})));
+      }
+      if(settingsRes.data){
+        setStars(settingsRes.data.stars||0);
+      }
+      setDbLoaded(true);
+    }
+    loadAll();
+  },[]);
+
+  /* ── Supabase: stars 변경 시 DB 동기화 ── */
+  useEffect(()=>{
+    if(!dbLoaded) return;
+    supabase.from("family_settings").update({stars,updated_at:new Date().toISOString()}).eq("id",1).then(()=>{});
+  },[stars,dbLoaded]);
+
+  const addEvent=useCallback(ev=>{
+    setEvents(p=>[...p,ev]);
+    supabase.from("events").insert({id:ev.id,title:ev.title,date:ev.date,start_hour:ev.startHour,start_min:ev.startMin,end_hour:ev.endHour,end_min:ev.endMin,color:ev.color,emoji:ev.emoji}).then(()=>{});
+  },[]);
   const handleLogin=useCallback(u=>setUser(u),[]);
   const handleUpdateUser=useCallback(u=>{setUser(u);localStorage.setItem("fd_user",JSON.stringify(u));},[]);
   const handleLogout=useCallback(()=>{setUser(null);localStorage.removeItem("fd_user");},[]);
@@ -1779,14 +1819,31 @@ export default function FamilyDay() {
   const toggleTodo=useCallback(id=>{
     const dk=fmtDateKey(new Date());
     setTodos(prev=>prev.map(t=>{
-      if(t.id===id&&!t.isDone){setStars(s=>s+t.starReward);return{...t,isDone:true,doneDate:dk};}
-      if(t.id===id&&t.isDone&&t.owner==="mom")return{...t,isDone:false,doneDate:undefined};
+      if(t.id===id&&!t.isDone){
+        setStars(s=>s+t.starReward);
+        const updated={...t,isDone:true,doneDate:dk};
+        supabase.from("todos").update({is_done:true,done_date:dk}).eq("id",id).then(()=>{});
+        return updated;
+      }
+      if(t.id===id&&t.isDone&&t.owner==="mom"){
+        supabase.from("todos").update({is_done:false,done_date:null}).eq("id",id).then(()=>{});
+        return{...t,isDone:false,doneDate:undefined};
+      }
       return t;
     }));
   },[]);
-  const deleteTodo=useCallback(id=>setTodos(p=>p.filter(t=>t.id!==id)),[]);
-  const addTodo=useCallback(item=>setTodos(p=>[...p,item]),[]);
-  const editTodo=useCallback(updated=>setTodos(p=>p.map(t=>t.id===updated.id?updated:t)),[]);
+  const deleteTodo=useCallback(id=>{
+    setTodos(p=>p.filter(t=>t.id!==id));
+    supabase.from("todos").delete().eq("id",id).then(()=>{});
+  },[]);
+  const addTodo=useCallback(item=>{
+    setTodos(p=>[...p,item]);
+    supabase.from("todos").insert({id:item.id,text:item.text,owner:item.owner,is_done:item.isDone||false,star_reward:item.starReward||1,created_date:item.createdDate,is_weekly:item.isWeekly||false}).then(()=>{});
+  },[]);
+  const editTodo=useCallback(updated=>{
+    setTodos(p=>p.map(t=>t.id===updated.id?updated:t));
+    supabase.from("todos").update({text:updated.text,owner:updated.owner,star_reward:updated.starReward,is_weekly:updated.isWeekly}).eq("id",updated.id).then(()=>{});
+  },[]);
 
   const today=new Date();
   const todayKey=fmtDateKey(today);
@@ -1807,8 +1864,14 @@ export default function FamilyDay() {
   },[user]);
 
   const spendStars=useCallback(cost=>setStars(s=>Math.max(0,s-cost)),[]);
-  const addCoupon=useCallback(c=>setCoupons(p=>[...p,c].sort((a,b)=>a.starCost-b.starCost)),[]);
-  const deleteCoupon=useCallback(id=>setCoupons(p=>p.filter(c=>c.id!==id)),[]);
+  const addCoupon=useCallback(c=>{
+    setCoupons(p=>[...p,c].sort((a,b)=>a.starCost-b.starCost));
+    supabase.from("coupons").insert({id:c.id,star_cost:c.starCost,title:c.title,description:c.desc,emoji:c.emoji}).then(()=>{});
+  },[]);
+  const deleteCoupon=useCallback(id=>{
+    setCoupons(p=>p.filter(c=>c.id!==id));
+    supabase.from("coupons").delete().eq("id",id).then(()=>{});
+  },[]);
 
   /* Show home tab content vs timeline vs calendar */
   const showHome = navTab === "home" && !showCoupon;
