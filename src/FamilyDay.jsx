@@ -1567,7 +1567,46 @@ function MyPage({ user, onUpdate, onLogout, onCouponManage }){
   const [editingName, setEditingName] = useState(false);
   const [nickname, setNickname] = useState(user.nickname);
   const [showAddMember, setShowAddMember] = useState(false);
+  const [inviteCode, setInviteCode] = useState(null);
+  const [showJoinInput, setShowJoinInput] = useState(false);
+  const [joinCode, setJoinCode] = useState("");
+  const [joinError, setJoinError] = useState("");
+  const [joinLoading, setJoinLoading] = useState(false);
   const fileRef = useRef(null);
+
+  const generateInvite = async () => {
+    const code = "FD-" + Math.random().toString(36).substring(2,6).toUpperCase();
+    const expires = new Date(Date.now() + 24*60*60*1000).toISOString();
+    await supabase.from("family_invites").insert({family_id:user.familyId,code,invited_by:user.id,expires_at:expires});
+    setInviteCode(code);
+  };
+
+  const handleJoin = async () => {
+    setJoinError("");
+    if(!joinCode.trim()) return setJoinError("초대 코드를 입력해주세요");
+    setJoinLoading(true);
+    const {data:invite}=await supabase.from("family_invites").select("*").eq("code",joinCode.trim().toUpperCase()).is("used_by",null).gt("expires_at",new Date().toISOString()).single();
+    if(!invite){setJoinLoading(false);return setJoinError("유효하지 않거나 만료된 코드예요");}
+    // 기존 가족에서 나가기 (본인 멤버 삭제)
+    await supabase.from("family_members").delete().eq("user_id",user.id);
+    // 새 가족에 합류
+    await supabase.from("family_members").insert({family_id:invite.family_id,user_id:user.id,name:user.nickname,role:"부모",emoji:"👩"});
+    // 초대 코드 사용 처리
+    await supabase.from("family_invites").update({used_by:user.id}).eq("id",invite.id);
+    // 가족 정보 새로고침
+    const {data:members}=await supabase.from("family_members").select("*").eq("family_id",invite.family_id).order("created_at");
+    const updated={...user,familyId:invite.family_id,members:(members||[]).map(m=>({id:m.id,name:m.name,role:m.role,emoji:m.emoji,userId:m.user_id}))};
+    onUpdate(updated);
+    setJoinLoading(false);
+    setShowJoinInput(false);
+    setJoinCode("");
+  };
+
+  const deleteMember = async (memberId) => {
+    await supabase.from("family_members").delete().eq("id",memberId);
+    const updated={...user,members:user.members.filter(m=>m.id!==memberId)};
+    onUpdate(updated);
+  };
 
   const handlePhotoChange = (e) => {
     const file = e.target.files?.[0];
@@ -1671,6 +1710,11 @@ function MyPage({ user, onUpdate, onLogout, onCouponManage }){
               <div style={{fontSize:15,fontWeight:700,color:C.textDark,fontFamily:"'Nunito',sans-serif"}}>{m.name}</div>
               <div style={{fontSize:12,fontWeight:600,color:C.textMid}}>{m.role}</div>
             </div>
+            {m.userId!==user.id&&(
+              <button onClick={()=>deleteMember(m.id)} style={{
+                background:"none",border:"none",cursor:"pointer",padding:6,color:C.textLight,fontSize:16,
+              }}>✕</button>
+            )}
           </div>
         ))}
         <button onClick={()=>setShowAddMember(true)} style={{
@@ -1682,6 +1726,80 @@ function MyPage({ user, onUpdate, onLogout, onCouponManage }){
           onMouseEnter={e=>{e.currentTarget.style.borderColor=C.primary;e.currentTarget.style.color=C.primary;}}
           onMouseLeave={e=>{e.currentTarget.style.borderColor=C.border;e.currentTarget.style.color=C.textMid;}}
         >+ 구성원 추가</button>
+      </div>
+
+      {/* 초대 코드 */}
+      <div style={{background:"white",borderRadius:20,padding:"20px 20px",boxShadow:"0 4px 20px rgba(108,99,255,.08)",marginBottom:16}}>
+        <h3 style={{margin:"0 0 16px",fontSize:16,fontWeight:800,color:C.textDark,fontFamily:"'Nunito',sans-serif",display:"flex",alignItems:"center",gap:8}}>
+          🔗 가족 초대
+        </h3>
+
+        {inviteCode ? (
+          <div style={{textAlign:"center",padding:"12px 0"}}>
+            <div style={{fontSize:13,fontWeight:600,color:C.textMid,marginBottom:8}}>초대 코드 (24시간 유효)</div>
+            <div style={{fontSize:28,fontWeight:900,color:C.primary,fontFamily:"'Nunito',sans-serif",letterSpacing:2,marginBottom:12}}>{inviteCode}</div>
+            <button onClick={()=>{navigator.clipboard?.writeText(inviteCode);}} style={{
+              padding:"8px 20px",borderRadius:999,border:"none",
+              background:C.bg,color:C.primary,fontSize:13,fontWeight:700,
+              fontFamily:"'Nunito',sans-serif",cursor:"pointer",
+            }}>코드 복사</button>
+          </div>
+        ) : (
+          <button onClick={generateInvite} style={{
+            width:"100%",padding:"12px",borderRadius:14,border:"none",
+            background:`linear-gradient(135deg,${C.primary},${C.primaryLight})`,
+            color:"white",fontSize:14,fontWeight:700,
+            fontFamily:"'Nunito',sans-serif",cursor:"pointer",
+            boxShadow:"0 4px 16px rgba(108,99,255,.25)",transition:"all .2s",
+          }}
+            onMouseEnter={e=>e.currentTarget.style.transform="scale(1.02)"}
+            onMouseLeave={e=>e.currentTarget.style.transform="scale(1)"}
+          >초대 코드 생성</button>
+        )}
+
+        <div style={{borderTop:`1px solid ${C.border}`,marginTop:16,paddingTop:16}}>
+          {showJoinInput ? (
+            <div>
+              <input value={joinCode} onChange={e=>setJoinCode(e.target.value)}
+                placeholder="초대 코드 입력 (예: FD-A3K9)"
+                style={{
+                  width:"100%",padding:"12px 14px",borderRadius:14,
+                  border:`2px solid ${C.border}`,fontSize:14,fontWeight:600,
+                  fontFamily:"'Nunito',sans-serif",color:C.textDark,
+                  outline:"none",background:C.bg,boxSizing:"border-box",
+                  marginBottom:8,textTransform:"uppercase",letterSpacing:1,
+                }}
+                onFocus={e=>e.target.style.borderColor=C.primary}
+                onBlur={e=>e.target.style.borderColor=C.border}
+                onKeyDown={e=>e.key==="Enter"&&handleJoin()}
+              />
+              {joinError&&<div style={{fontSize:13,fontWeight:700,color:C.secondary,marginBottom:8}}>{joinError}</div>}
+              <div style={{display:"flex",gap:8}}>
+                <button onClick={handleJoin} disabled={joinLoading} style={{
+                  flex:1,padding:"10px",borderRadius:12,border:"none",
+                  background:C.primary,color:"white",fontSize:14,fontWeight:700,
+                  fontFamily:"'Nunito',sans-serif",cursor:joinLoading?"not-allowed":"pointer",
+                  opacity:joinLoading?.7:1,
+                }}>{joinLoading?"합류 중...":"가족 합류"}</button>
+                <button onClick={()=>{setShowJoinInput(false);setJoinCode("");setJoinError("");}} style={{
+                  padding:"10px 16px",borderRadius:12,border:"none",
+                  background:C.bg,color:C.textMid,fontSize:14,fontWeight:700,
+                  fontFamily:"'Nunito',sans-serif",cursor:"pointer",
+                }}>취소</button>
+              </div>
+            </div>
+          ) : (
+            <button onClick={()=>setShowJoinInput(true)} style={{
+              width:"100%",padding:"12px",borderRadius:14,border:`2px dashed ${C.border}`,
+              background:"transparent",color:C.textMid,fontSize:14,fontWeight:700,
+              fontFamily:"'Nunito',sans-serif",cursor:"pointer",
+              transition:"all .15s",
+            }}
+              onMouseEnter={e=>{e.currentTarget.style.borderColor=C.primary;e.currentTarget.style.color=C.primary;}}
+              onMouseLeave={e=>{e.currentTarget.style.borderColor=C.border;e.currentTarget.style.color=C.textMid;}}
+            >초대 코드로 가족 합류</button>
+          )}
+        </div>
       </div>
 
       {/* Coupon manage */}
@@ -1712,8 +1830,10 @@ function MyPage({ user, onUpdate, onLogout, onCouponManage }){
       {showAddMember&&(
         <AddMemberModal
           onClose={()=>setShowAddMember(false)}
-          onAdd={(member)=>{
-            const updated={...user,members:[...user.members,member]};
+          onAdd={async(member)=>{
+            const {data:row}=await supabase.from("family_members").insert({family_id:user.familyId,name:member.name,role:member.role,emoji:member.emoji}).select("id").single();
+            const newMember={...member,id:row?.id||member.id};
+            const updated={...user,members:[...user.members,newMember]};
             onUpdate(updated);
           }}
         />
@@ -1741,39 +1861,50 @@ export default function FamilyDay() {
   const [authReady,setAuthReady]=useState(false);
   const [dbLoaded,setDbLoaded]=useState(false);
 
+  /* ── Supabase: 가족/구성원 로드 ── */
+  async function loadFamily(userId){
+    // 1. 이 유저가 속한 가족 찾기
+    const {data:memberRow}=await supabase.from("family_members").select("family_id").eq("user_id",userId).limit(1).single();
+    let familyId=memberRow?.family_id;
+    // 2. 가족이 없으면 새로 생성
+    if(!familyId){
+      const {data:newFamily}=await supabase.from("families").insert({name:"우리 가족"}).select("id").single();
+      familyId=newFamily.id;
+      // 본인을 부모로 등록
+      const {data:{user:authUser}}=await supabase.auth.getUser();
+      await supabase.from("family_members").insert({family_id:familyId,user_id:userId,name:authUser.email.split("@")[0],role:"부모",emoji:"👩"});
+    }
+    // 3. 가족 구성원 목록 조회
+    const {data:members}=await supabase.from("family_members").select("*").eq("family_id",familyId).order("created_at");
+    return {familyId,members:(members||[]).map(m=>({id:m.id,name:m.name,role:m.role,emoji:m.emoji,userId:m.user_id}))};
+  }
+
   /* ── Supabase Auth: 세션 감지 ── */
   useEffect(()=>{
-    supabase.auth.getSession().then(({data:{session}})=>{
+    async function handleSession(session){
       if(session?.user){
         const u=session.user;
         const stored=localStorage.getItem("fd_user");
         const prev=stored?JSON.parse(stored):null;
+        const {familyId,members}=await loadFamily(u.id);
         const merged={
           id:u.id,
           email:u.email,
           nickname:prev?.nickname||u.email.split("@")[0],
           photo:prev?.photo||null,
-          members:prev?.members||INITIAL_FAMILY_MEMBERS,
+          familyId,
+          members,
         };
         setUser(merged);
         localStorage.setItem("fd_user",JSON.stringify(merged));
       }
-      setAuthReady(true);
+    }
+    supabase.auth.getSession().then(({data:{session}})=>{
+      handleSession(session).then(()=>setAuthReady(true));
     });
     const {data:{subscription}}=supabase.auth.onAuthStateChange((_event,session)=>{
       if(session?.user){
-        const u=session.user;
-        const stored=localStorage.getItem("fd_user");
-        const prev=stored?JSON.parse(stored):null;
-        const merged={
-          id:u.id,
-          email:u.email,
-          nickname:prev?.nickname||u.email.split("@")[0],
-          photo:prev?.photo||null,
-          members:prev?.members||INITIAL_FAMILY_MEMBERS,
-        };
-        setUser(merged);
-        localStorage.setItem("fd_user",JSON.stringify(merged));
+        handleSession(session);
       } else {
         setUser(null);
       }
