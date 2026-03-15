@@ -1,0 +1,6 @@
+{
+  "enabledMcpjsonServers": [
+    "atlassian-jira",
+    "atlassian-confluence"
+  ]
+}
