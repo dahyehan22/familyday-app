@@ -1373,25 +1373,20 @@ function AuthPage({ onLogin }){
     boxSizing:"border-box",
   };
 
-  const handleSend = () => {
+  const [loading, setLoading] = useState(false);
+
+  const handleSend = async () => {
     setError("");
     if(!email.trim()) return setError("이메일을 입력해주세요");
     if(!/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(email)) return setError("올바른 이메일 형식이 아니에요");
-    // TODO: Supabase signInWithOtp({ email }) 연동
+    setLoading(true);
+    const { error: authError } = await supabase.auth.signInWithOtp({
+      email: email.trim(),
+      options: { emailRedirectTo: window.location.origin + window.location.pathname },
+    });
+    setLoading(false);
+    if(authError) return setError("메일 전송에 실패했어요. 다시 시도해주세요.");
     setSent(true);
-  };
-
-  // 목업: 인증 메일 전송 후 "인증 완료" 버튼으로 로그인 시뮬레이션
-  const handleMockVerify = () => {
-    const user = {
-      id:"user_"+Date.now(),
-      email:email.trim(),
-      nickname:email.split("@")[0],
-      photo:null,
-      members:INITIAL_FAMILY_MEMBERS,
-    };
-    localStorage.setItem("fd_user",JSON.stringify(user));
-    onLogin(user);
   };
 
   return(
@@ -1429,15 +1424,16 @@ function AuthPage({ onLogin }){
               </div>
             )}
 
-            <button onClick={handleSend} style={{
+            <button onClick={handleSend} disabled={loading} style={{
               width:"100%",padding:"14px",borderRadius:16,border:"none",marginTop:18,
-              background:`linear-gradient(135deg,${C.primary},${C.primaryLight})`,
+              background:loading?"#B0ADE0":`linear-gradient(135deg,${C.primary},${C.primaryLight})`,
               color:"white",fontSize:16,fontWeight:800,fontFamily:"'Nunito',sans-serif",
-              cursor:"pointer",boxShadow:"0 4px 16px rgba(108,99,255,.35)",transition:"all .2s",
+              cursor:loading?"not-allowed":"pointer",boxShadow:"0 4px 16px rgba(108,99,255,.35)",transition:"all .2s",
+              opacity:loading?.7:1,
             }}
-              onMouseEnter={e=>e.currentTarget.style.transform="scale(1.02)"}
+              onMouseEnter={e=>{if(!loading)e.currentTarget.style.transform="scale(1.02)";}}
               onMouseLeave={e=>e.currentTarget.style.transform="scale(1)"}
-            >인증 메일 보내기</button>
+            >{loading?"보내는 중...":"인증 메일 보내기"}</button>
           </div>
         ) : (
           <div style={{textAlign:"center",animation:"slideUp .3s ease both"}}>
@@ -1455,18 +1451,6 @@ function AuthPage({ onLogin }){
             <p style={{margin:"0 0 24px",fontSize:13,fontWeight:600,color:C.textLight}}>
               으로 인증 링크를 보냈어요
             </p>
-
-            {/* 목업용 인증 완료 버튼 (Supabase 연동 시 제거) */}
-            <button onClick={handleMockVerify} style={{
-              width:"100%",padding:"14px",borderRadius:16,border:"none",
-              background:`linear-gradient(135deg,${C.primary},${C.primaryLight})`,
-              color:"white",fontSize:16,fontWeight:800,fontFamily:"'Nunito',sans-serif",
-              cursor:"pointer",boxShadow:"0 4px 16px rgba(108,99,255,.35)",transition:"all .2s",
-              marginBottom:12,
-            }}
-              onMouseEnter={e=>e.currentTarget.style.transform="scale(1.02)"}
-              onMouseLeave={e=>e.currentTarget.style.transform="scale(1)"}
-            >인증 완료 (목업)</button>
 
             <button onClick={()=>setSent(false)} style={{
               width:"100%",padding:"12px",borderRadius:14,border:"none",
@@ -1753,8 +1737,49 @@ export default function FamilyDay() {
   const [navTab,setNavTab]=useState("home");
   const [mounted,setMounted]=useState(false);
   const [events,setEvents]=useState([]);
-  const [user,setUser]=useState(()=>{try{const s=localStorage.getItem("fd_user");return s?JSON.parse(s):null;}catch{return null;}});
+  const [user,setUser]=useState(null);
+  const [authReady,setAuthReady]=useState(false);
   const [dbLoaded,setDbLoaded]=useState(false);
+
+  /* ── Supabase Auth: 세션 감지 ── */
+  useEffect(()=>{
+    supabase.auth.getSession().then(({data:{session}})=>{
+      if(session?.user){
+        const u=session.user;
+        const stored=localStorage.getItem("fd_user");
+        const prev=stored?JSON.parse(stored):null;
+        const merged={
+          id:u.id,
+          email:u.email,
+          nickname:prev?.nickname||u.email.split("@")[0],
+          photo:prev?.photo||null,
+          members:prev?.members||INITIAL_FAMILY_MEMBERS,
+        };
+        setUser(merged);
+        localStorage.setItem("fd_user",JSON.stringify(merged));
+      }
+      setAuthReady(true);
+    });
+    const {data:{subscription}}=supabase.auth.onAuthStateChange((_event,session)=>{
+      if(session?.user){
+        const u=session.user;
+        const stored=localStorage.getItem("fd_user");
+        const prev=stored?JSON.parse(stored):null;
+        const merged={
+          id:u.id,
+          email:u.email,
+          nickname:prev?.nickname||u.email.split("@")[0],
+          photo:prev?.photo||null,
+          members:prev?.members||INITIAL_FAMILY_MEMBERS,
+        };
+        setUser(merged);
+        localStorage.setItem("fd_user",JSON.stringify(merged));
+      } else {
+        setUser(null);
+      }
+    });
+    return()=>subscription.unsubscribe();
+  },[]);
 
   /* ── Supabase: 초기 데이터 로드 ── */
   useEffect(()=>{
@@ -1810,9 +1835,13 @@ export default function FamilyDay() {
     setEvents(p=>[...p,ev]);
     supabase.from("events").insert({id:ev.id,title:ev.title,date:ev.date,start_hour:ev.startHour,start_min:ev.startMin,end_hour:ev.endHour,end_min:ev.endMin,color:ev.color,emoji:ev.emoji}).then(()=>{});
   },[]);
-  const handleLogin=useCallback(u=>setUser(u),[]);
+  const handleLogin=useCallback(u=>{setUser(u);localStorage.setItem("fd_user",JSON.stringify(u));},[]);
   const handleUpdateUser=useCallback(u=>{setUser(u);localStorage.setItem("fd_user",JSON.stringify(u));},[]);
-  const handleLogout=useCallback(()=>{setUser(null);localStorage.removeItem("fd_user");},[]);
+  const handleLogout=useCallback(async()=>{
+    await supabase.auth.signOut();
+    setUser(null);
+    localStorage.removeItem("fd_user");
+  },[]);
 
   useEffect(()=>{requestAnimationFrame(()=>setMounted(true));},[]);
 
