@@ -1,6 +1,6 @@
 # FamilyDay — 개발 계획
 
-> 최종 업데이트: 2026-03-15
+> 최종 업데이트: 2026-03-23
 
 ---
 
@@ -55,12 +55,18 @@
 - [x] Supabase 클라이언트 초기화 (`src/supabaseClient.js`)
 - [x] GitHub Actions에 환경변수 주입 (deploy.yml)
 
-### 1-2. Magic Link 인증 연동
-- [x] `AuthPage`의 `handleSend`에서 `supabase.auth.signInWithOtp({ email })` 호출
-- [x] "인증 완료 (목업)" 버튼 제거
-- [x] `onAuthStateChange` 리스너로 세션 감지 → 자동 로그인
-- [x] 리다이렉트 URL 설정 (이메일 인증 후 앱으로 복귀)
+### 1-2. 이메일+비밀번호 인증 연동 (Magic Link → 변경)
+- [x] Magic Link(OTP) → 이메일+비밀번호 방식으로 전환
+- [x] Supabase Dashboard에서 Email Provider 활성화
+- [x] 회원가입: `supabase.auth.signUp({ email, password })`
+- [x] 로그인: `supabase.auth.signInWithPassword({ email, password })`
+- [x] 로그인/회원가입 탭 전환 UI
+- [x] 회원가입 후 이메일 확인 안내 화면 (Confirm email ON 시)
+- [x] 중복 이메일 / 잘못된 비밀번호 / Rate limit 에러 처리
+- [x] `onAuthStateChange` 리스너로 세션 감지 → 자동 로그인 유지
 - [x] 로그아웃 시 `supabase.auth.signOut()` 호출
+- [ ] **[테스트 예정 - 2026-03-24]** 신규 회원가입 → 로그인 플로우 검증
+- [ ] **[테스트 예정 - 2026-03-24]** 초대 코드로 가족 합류 → 데이터 공유 검증
 
 ### 1-3. DB 테이블 설계
 
@@ -147,7 +153,11 @@ notifications
 ```
 
 - [x] Supabase에 테이블 생성 (todos, events, coupons, family_settings)
-- [ ] RLS(Row Level Security) 정책 설정 (가족 단위 접근 제어)
+- [x] RLS(Row Level Security) 정책 설정 (가족 단위 접근 제어)
+  - [x] todos/events/coupons/family_settings/families/family_members/family_invites 전체 적용
+  - [x] `get_my_family_id()` 헬퍼 함수 생성
+  - [x] todos/events/coupons/family_settings 테이블에 family_id 컬럼 추가
+  - [x] 기존 데이터 family_id 마이그레이션 완료
 - [x] 기존 useState 데이터를 Supabase CRUD로 교체
   - [x] events: 조회/추가/삭제
   - [x] todos: 조회/추가/완료 토글/삭제/수정
