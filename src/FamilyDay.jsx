@@ -1362,8 +1362,10 @@ const INITIAL_FAMILY_MEMBERS = [
 
 function AuthPage({ onLogin }){
   const [email, setEmail] = useState("");
-  const [sent, setSent] = useState(false);
+  const [password, setPassword] = useState("");
+  const [isSignUp, setIsSignUp] = useState(false);
   const [error, setError] = useState("");
+  const [loading, setLoading] = useState(false);
 
   const inputStyle = {
     width:"100%",padding:"14px 16px",borderRadius:14,
@@ -1373,25 +1375,38 @@ function AuthPage({ onLogin }){
     boxSizing:"border-box",
   };
 
-  const [loading, setLoading] = useState(false);
-
-  const handleSend = async () => {
+  const handleSubmit = async () => {
     setError("");
     if(!email.trim()) return setError("이메일을 입력해주세요");
     if(!/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(email)) return setError("올바른 이메일 형식이 아니에요");
+    if(!password) return setError("비밀번호를 입력해주세요");
+    if(isSignUp && password.length < 6) return setError("비밀번호는 6자 이상이어야 해요");
     setLoading(true);
-    const { error: authError } = await supabase.auth.signInWithOtp({
-      email: email.trim(),
-      options: { emailRedirectTo: window.location.origin + window.location.pathname },
-    });
-    setLoading(false);
-    if(authError) return setError("메일 전송에 실패했어요. 다시 시도해주세요.");
-    setSent(true);
+    if(isSignUp){
+      const { error: authError } = await supabase.auth.signUp({
+        email: email.trim(),
+        password,
+      });
+      setLoading(false);
+      if(authError){
+        if(authError.message.includes("already registered")) return setError("이미 가입된 이메일이에요. 로그인해주세요.");
+        return setError("회원가입에 실패했어요. 다시 시도해주세요.");
+      }
+    } else {
+      const { error: authError } = await supabase.auth.signInWithPassword({
+        email: email.trim(),
+        password,
+      });
+      setLoading(false);
+      if(authError){
+        if(authError.message.includes("Invalid login")) return setError("이메일 또는 비밀번호가 맞지 않아요");
+        return setError("로그인에 실패했어요. 다시 시도해주세요.");
+      }
+    }
   };
 
   return(
     <div style={{animation:"slideUp .4s ease both"}}>
-      {/* Logo area */}
       <div style={{textAlign:"center",marginBottom:28}}>
         <div style={{fontSize:56,marginBottom:8}}>👨‍👩‍👧</div>
         <h2 style={{margin:0,fontSize:22,fontWeight:900,color:C.textDark,fontFamily:"'Nunito',sans-serif"}}>FamilyDay</h2>
@@ -1399,66 +1414,59 @@ function AuthPage({ onLogin }){
       </div>
 
       <div style={{background:"white",borderRadius:20,padding:"24px 20px",boxShadow:"0 4px 20px rgba(108,99,255,.08)"}}>
+        <div style={{display:"flex",gap:0,marginBottom:20,background:C.bg,borderRadius:12,padding:3}}>
+          {["로그인","회원가입"].map((label,i)=>(
+            <button key={label} onClick={()=>{setIsSignUp(i===1);setError("");}} style={{
+              flex:1,padding:"10px 0",borderRadius:10,border:"none",
+              background:(i===0?!isSignUp:isSignUp)?"white":"transparent",
+              color:(i===0?!isSignUp:isSignUp)?C.textDark:C.textLight,
+              fontSize:14,fontWeight:800,fontFamily:"'Nunito',sans-serif",
+              cursor:"pointer",transition:"all .2s",
+              boxShadow:(i===0?!isSignUp:isSignUp)?"0 2px 8px rgba(0,0,0,.06)":"none",
+            }}>{label}</button>
+          ))}
+        </div>
 
-        {!sent ? (
-          <div>
-            <h3 style={{margin:"0 0 6px",fontSize:18,fontWeight:800,color:C.textDark,fontFamily:"'Nunito',sans-serif"}}>
-              이메일로 시작하기
-            </h3>
-            <p style={{margin:"0 0 20px",fontSize:13,fontWeight:600,color:C.textMid}}>
-              이메일을 입력하면 인증 링크를 보내드려요
-            </p>
+        <h3 style={{margin:"0 0 6px",fontSize:18,fontWeight:800,color:C.textDark,fontFamily:"'Nunito',sans-serif"}}>
+          {isSignUp?"새 계정 만들기":"다시 오셨군요!"}
+        </h3>
+        <p style={{margin:"0 0 20px",fontSize:13,fontWeight:600,color:C.textMid}}>
+          {isSignUp?"이메일과 비밀번호로 가입해요":"이메일과 비밀번호를 입력해주세요"}
+        </p>
 
-            <label style={{fontSize:12,fontWeight:700,color:C.textMid,marginBottom:6,display:"block"}}>이메일</label>
-            <input type="email" value={email} onChange={e=>setEmail(e.target.value)}
-              placeholder="example@email.com"
-              style={{...inputStyle,marginBottom:4}}
-              onFocus={e=>e.target.style.borderColor=C.primary}
-              onBlur={e=>e.target.style.borderColor=C.border}
-              onKeyDown={e=>e.key==="Enter"&&handleSend()}
-            />
+        <label style={{fontSize:12,fontWeight:700,color:C.textMid,marginBottom:6,display:"block"}}>이메일</label>
+        <input type="email" value={email} onChange={e=>setEmail(e.target.value)}
+          placeholder="example@email.com"
+          style={{...inputStyle,marginBottom:14}}
+          onFocus={e=>e.target.style.borderColor=C.primary}
+          onBlur={e=>e.target.style.borderColor=C.border}
+        />
 
-            {error&&(
-              <div style={{marginTop:12,padding:"10px 14px",borderRadius:12,background:"#FFF0F0",border:"1.5px solid #FFB4B4",fontSize:13,fontWeight:700,color:C.secondary,fontFamily:"'Nunito',sans-serif"}}>
-                {error}
-              </div>
-            )}
+        <label style={{fontSize:12,fontWeight:700,color:C.textMid,marginBottom:6,display:"block"}}>비밀번호</label>
+        <input type="password" value={password} onChange={e=>setPassword(e.target.value)}
+          placeholder={isSignUp?"6자 이상 입력해주세요":"비밀번호 입력"}
+          style={{...inputStyle,marginBottom:4}}
+          onFocus={e=>e.target.style.borderColor=C.primary}
+          onBlur={e=>e.target.style.borderColor=C.border}
+          onKeyDown={e=>e.key==="Enter"&&handleSubmit()}
+        />
 
-            <button onClick={handleSend} disabled={loading} style={{
-              width:"100%",padding:"14px",borderRadius:16,border:"none",marginTop:18,
-              background:loading?"#B0ADE0":`linear-gradient(135deg,${C.primary},${C.primaryLight})`,
-              color:"white",fontSize:16,fontWeight:800,fontFamily:"'Nunito',sans-serif",
-              cursor:loading?"not-allowed":"pointer",boxShadow:"0 4px 16px rgba(108,99,255,.35)",transition:"all .2s",
-              opacity:loading?.7:1,
-            }}
-              onMouseEnter={e=>{if(!loading)e.currentTarget.style.transform="scale(1.02)";}}
-              onMouseLeave={e=>e.currentTarget.style.transform="scale(1)"}
-            >{loading?"보내는 중...":"인증 메일 보내기"}</button>
-          </div>
-        ) : (
-          <div style={{textAlign:"center",animation:"slideUp .3s ease both"}}>
-            <div style={{
-              width:64,height:64,borderRadius:"50%",margin:"0 auto 16px",
-              background:`linear-gradient(135deg,${C.accent}20,${C.accent}10)`,
-              display:"flex",alignItems:"center",justifyContent:"center",fontSize:30,
-            }}>✉️</div>
-            <h3 style={{margin:"0 0 8px",fontSize:18,fontWeight:800,color:C.textDark,fontFamily:"'Nunito',sans-serif"}}>
-              메일을 확인해주세요
-            </h3>
-            <p style={{margin:"0 0 4px",fontSize:14,fontWeight:600,color:C.textMid}}>
-              <span style={{color:C.primary,fontWeight:800}}>{email}</span>
-            </p>
-            <p style={{margin:"0 0 24px",fontSize:13,fontWeight:600,color:C.textLight}}>
-              으로 인증 링크를 보냈어요
-            </p>
-
-            <button onClick={()=>setSent(false)} style={{
-              width:"100%",padding:"12px",borderRadius:14,border:"none",
-              background:C.bg,color:C.textMid,fontSize:14,fontWeight:700,
-              fontFamily:"'Nunito',sans-serif",cursor:"pointer",transition:"all .15s",
-            }}>다른 이메일로 시도</button>
+        {error&&(
+          <div style={{marginTop:12,padding:"10px 14px",borderRadius:12,background:"#FFF0F0",border:"1.5px solid #FFB4B4",fontSize:13,fontWeight:700,color:C.secondary,fontFamily:"'Nunito',sans-serif"}}>
+            {error}
           </div>
         )}
+
+        <button onClick={handleSubmit} disabled={loading} style={{
+          width:"100%",padding:"14px",borderRadius:16,border:"none",marginTop:18,
+          background:loading?"#B0ADE0":`linear-gradient(135deg,${C.primary},${C.primaryLight})`,
+          color:"white",fontSize:16,fontWeight:800,fontFamily:"'Nunito',sans-serif",
+          cursor:loading?"not-allowed":"pointer",boxShadow:"0 4px 16px rgba(108,99,255,.35)",transition:"all .2s",
+          opacity:loading?.7:1,
+        }}
+          onMouseEnter={e=>{if(!loading)e.currentTarget.style.transform="scale(1.02)";}}
+          onMouseLeave={e=>e.currentTarget.style.transform="scale(1)"}
+        >{loading?(isSignUp?"가입 중...":"로그인 중..."):(isSignUp?"회원가입":"로그인")}</button>
       </div>
     </div>
   );
