@@ -1366,6 +1366,7 @@ function AuthPage({ onLogin }){
   const [isSignUp, setIsSignUp] = useState(false);
   const [error, setError] = useState("");
   const [loading, setLoading] = useState(false);
+  const [signUpDone, setSignUpDone] = useState(false);
 
   const inputStyle = {
     width:"100%",padding:"14px 16px",borderRadius:14,
@@ -1383,15 +1384,23 @@ function AuthPage({ onLogin }){
     if(isSignUp && password.length < 6) return setError("비밀번호는 6자 이상이어야 해요");
     setLoading(true);
     if(isSignUp){
-      const { error: authError } = await supabase.auth.signUp({
+      const { data, error: authError } = await supabase.auth.signUp({
         email: email.trim(),
         password,
       });
       setLoading(false);
       if(authError){
         if(authError.message.includes("already registered")) return setError("이미 가입된 이메일이에요. 로그인해주세요.");
+        if(authError.status===429) return setError("요청이 너무 많아요. 잠시 후 다시 시도해주세요.");
         return setError("회원가입에 실패했어요. 다시 시도해주세요.");
       }
+      if(data?.user?.identities?.length===0) return setError("이미 가입된 이메일이에요. 로그인해주세요.");
+      if(data?.session){
+        // 이메일 확인 없이 바로 로그인된 경우 (Confirm email OFF)
+        return;
+      }
+      // 이메일 확인이 필요한 경우
+      setSignUpDone(true);
     } else {
       const { error: authError } = await supabase.auth.signInWithPassword({
         email: email.trim(),
@@ -1400,6 +1409,7 @@ function AuthPage({ onLogin }){
       setLoading(false);
       if(authError){
         if(authError.message.includes("Invalid login")) return setError("이메일 또는 비밀번호가 맞지 않아요");
+        if(authError.status===429) return setError("요청이 너무 많아요. 잠시 후 다시 시도해주세요.");
         return setError("로그인에 실패했어요. 다시 시도해주세요.");
       }
     }
@@ -1414,6 +1424,33 @@ function AuthPage({ onLogin }){
       </div>
 
       <div style={{background:"white",borderRadius:20,padding:"24px 20px",boxShadow:"0 4px 20px rgba(108,99,255,.08)"}}>
+
+        {signUpDone ? (
+          <div style={{textAlign:"center",animation:"slideUp .3s ease both"}}>
+            <div style={{
+              width:64,height:64,borderRadius:"50%",margin:"0 auto 16px",
+              background:`linear-gradient(135deg,${C.accent}20,${C.accent}10)`,
+              display:"flex",alignItems:"center",justifyContent:"center",fontSize:30,
+            }}>✉️</div>
+            <h3 style={{margin:"0 0 8px",fontSize:18,fontWeight:800,color:C.textDark,fontFamily:"'Nunito',sans-serif"}}>
+              메일을 확인해주세요
+            </h3>
+            <p style={{margin:"0 0 4px",fontSize:14,fontWeight:600,color:C.textMid}}>
+              <span style={{color:C.primary,fontWeight:800}}>{email}</span>
+            </p>
+            <p style={{margin:"0 0 24px",fontSize:13,fontWeight:600,color:C.textLight}}>
+              으로 인증 링크를 보냈어요
+            </p>
+            <button onClick={()=>{setSignUpDone(false);setIsSignUp(false);setPassword("");}} style={{
+              width:"100%",padding:"12px",borderRadius:14,border:"none",
+              background:`linear-gradient(135deg,${C.primary},${C.primaryLight})`,
+              color:"white",fontSize:14,fontWeight:700,
+              fontFamily:"'Nunito',sans-serif",cursor:"pointer",transition:"all .15s",
+              boxShadow:"0 4px 16px rgba(108,99,255,.35)",
+            }}>로그인하러 가기</button>
+          </div>
+        ) : (
+        <div>
         <div style={{display:"flex",gap:0,marginBottom:20,background:C.bg,borderRadius:12,padding:3}}>
           {["로그인","회원가입"].map((label,i)=>(
             <button key={label} onClick={()=>{setIsSignUp(i===1);setError("");}} style={{
@@ -1467,6 +1504,8 @@ function AuthPage({ onLogin }){
           onMouseEnter={e=>{if(!loading)e.currentTarget.style.transform="scale(1.02)";}}
           onMouseLeave={e=>e.currentTarget.style.transform="scale(1)"}
         >{loading?(isSignUp?"가입 중...":"로그인 중..."):(isSignUp?"회원가입":"로그인")}</button>
+        </div>
+        )}
       </div>
     </div>
   );
@@ -1922,12 +1961,14 @@ export default function FamilyDay() {
 
   /* ── Supabase: 초기 데이터 로드 ── */
   useEffect(()=>{
+    if(!user?.familyId) return;
+    const fid=user.familyId;
     async function loadAll(){
       const [todosRes,eventsRes,couponsRes,settingsRes]=await Promise.all([
-        supabase.from("todos").select("*"),
-        supabase.from("events").select("*"),
-        supabase.from("coupons").select("*"),
-        supabase.from("family_settings").select("*").eq("id",1).single(),
+        supabase.from("todos").select("*").eq("family_id",fid),
+        supabase.from("events").select("*").eq("family_id",fid),
+        supabase.from("coupons").select("*").eq("family_id",fid),
+        supabase.from("family_settings").select("*").eq("family_id",fid).single(),
       ]);
       if(todosRes.data){
         const mapped=todosRes.data.map(r=>({id:r.id,text:r.text,owner:r.owner,isDone:r.is_done,starReward:r.star_reward,createdDate:r.created_date,isWeekly:r.is_weekly,doneDate:r.done_date||undefined}));
@@ -1944,7 +1985,7 @@ export default function FamilyDay() {
           setTodos(newTodos);
           // DB에도 새 주간 할 일 저장
           for(const t of newTodos){
-            supabase.from("todos").insert({id:t.id,text:t.text,owner:t.owner,is_done:false,star_reward:t.starReward,created_date:t.createdDate,is_weekly:t.isWeekly}).then(()=>{});
+            supabase.from("todos").insert({id:t.id,text:t.text,owner:t.owner,is_done:false,star_reward:t.starReward,created_date:t.createdDate,is_weekly:t.isWeekly,family_id:fid}).then(()=>{});
           }
         } else {
           setTodos(mapped);
@@ -1962,17 +2003,18 @@ export default function FamilyDay() {
       setDbLoaded(true);
     }
     loadAll();
-  },[]);
+  },[user?.familyId]);
 
   /* ── Supabase: stars 변경 시 DB 동기화 ── */
   useEffect(()=>{
     if(!dbLoaded) return;
-    supabase.from("family_settings").update({stars,updated_at:new Date().toISOString()}).eq("id",1).then(()=>{});
+    if(!user?.familyId) return;
+    supabase.from("family_settings").upsert({family_id:user.familyId,stars,updated_at:new Date().toISOString()},{onConflict:"family_id"}).then(()=>{});
   },[stars,dbLoaded]);
 
   const addEvent=useCallback(ev=>{
     setEvents(p=>[...p,ev]);
-    supabase.from("events").insert({id:ev.id,title:ev.title,date:ev.date,start_hour:ev.startHour,start_min:ev.startMin,end_hour:ev.endHour,end_min:ev.endMin,color:ev.color,emoji:ev.emoji}).then(()=>{});
+    supabase.from("events").insert({id:ev.id,title:ev.title,date:ev.date,start_hour:ev.startHour,start_min:ev.startMin,end_hour:ev.endHour,end_min:ev.endMin,color:ev.color,emoji:ev.emoji,family_id:user?.familyId}).then(()=>{});
   },[]);
   const handleLogin=useCallback(u=>{setUser(u);localStorage.setItem("fd_user",JSON.stringify(u));},[]);
   const handleUpdateUser=useCallback(u=>{setUser(u);localStorage.setItem("fd_user",JSON.stringify(u));},[]);
@@ -2006,7 +2048,7 @@ export default function FamilyDay() {
   },[]);
   const addTodo=useCallback(item=>{
     setTodos(p=>[...p,item]);
-    supabase.from("todos").insert({id:item.id,text:item.text,owner:item.owner,is_done:item.isDone||false,star_reward:item.starReward||1,created_date:item.createdDate,is_weekly:item.isWeekly||false}).then(()=>{});
+    supabase.from("todos").insert({id:item.id,text:item.text,owner:item.owner,is_done:item.isDone||false,star_reward:item.starReward||1,created_date:item.createdDate,is_weekly:item.isWeekly||false,family_id:user?.familyId}).then(()=>{});
   },[]);
   const editTodo=useCallback(updated=>{
     setTodos(p=>p.map(t=>t.id===updated.id?updated:t));
@@ -2034,7 +2076,7 @@ export default function FamilyDay() {
   const spendStars=useCallback(cost=>setStars(s=>Math.max(0,s-cost)),[]);
   const addCoupon=useCallback(c=>{
     setCoupons(p=>[...p,c].sort((a,b)=>a.starCost-b.starCost));
-    supabase.from("coupons").insert({id:c.id,star_cost:c.starCost,title:c.title,description:c.desc,emoji:c.emoji}).then(()=>{});
+    supabase.from("coupons").insert({id:c.id,star_cost:c.starCost,title:c.title,description:c.desc,emoji:c.emoji,family_id:user?.familyId}).then(()=>{});
   },[]);
   const deleteCoupon=useCallback(id=>{
     setCoupons(p=>p.filter(c=>c.id!==id));
