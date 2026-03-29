@@ -720,14 +720,21 @@ function EventSheetWithAdd({ events, date, onClose, onAdd }) {
    KID'S DAY TIMELINE — Serpentine connected path
    ════════════════════════════════════════════════════ */
 function KidDayTimeline({kidName="아이"}) {
-  const TEST_CURRENT_IDX = 5; /* 테스트: "숙제"를 진행중으로 고정 */
-
-  const nodes = useMemo(() => TIMELINE_ITEMS.map((item, i) => {
-    let status = "future";
-    if (i < TEST_CURRENT_IDX) status = "done";
-    else if (i === TEST_CURRENT_IDX) status = "current";
-    return { ...item, status, side: stoneSide(i), idx: i };
-  }), []);
+  const nodes = useMemo(() => {
+    const now = new Date();
+    const nowMin = now.getHours() * 60 + now.getMinutes();
+    let currentIdx = 0;
+    for (let i = 0; i < TIMELINE_ITEMS.length; i++) {
+      const itemMin = TIMELINE_ITEMS[i].hour * 60 + TIMELINE_ITEMS[i].min;
+      if (nowMin >= itemMin) currentIdx = i;
+    }
+    return TIMELINE_ITEMS.map((item, i) => {
+      let status = "future";
+      if (i < currentIdx) status = "done";
+      else if (i === currentIdx) status = "current";
+      return { ...item, status, side: stoneSide(i), idx: i };
+    });
+  }, []);
 
   const currentRef = useRef(null);
   useEffect(() => {
@@ -736,8 +743,8 @@ function KidDayTimeline({kidName="아이"}) {
     }
   }, []);
 
-  /* ─── segment colors cycling ─── */
-  const segColors = [C.secondary, C.primary, C.accent, C.gold, C.primaryLight, C.accentLight];
+  /* ─── segment colors cycling (3가지로 제한) ─── */
+  const segColors = [C.secondary, C.primary, C.accent];
   const segColor = (i) => segColors[i % segColors.length];
 
   const SPINE_W = 48; /* center spine column width */
@@ -1155,8 +1162,9 @@ function CouponPage({stars,coupons,onBack,onUse}){
 }
 
 /* ════════════ COUPON MANAGE PAGE (부모용) ════════════ */
-function CouponManagePage({coupons,onBack,onAdd,onDelete}){
+function CouponManagePage({coupons,onBack,onAdd,onDelete,onEdit}){
   const [showAddModal,setShowAddModal]=useState(false);
+  const [editingCoupon,setEditingCoupon]=useState(null);
   const [deleteConfirm,setDeleteConfirm]=useState(null);
 
   return(
@@ -1207,6 +1215,15 @@ function CouponManagePage({coupons,onBack,onAdd,onDelete}){
               <div style={{fontSize:14,fontWeight:700,color:C.textDark,fontFamily:"'Nunito',sans-serif"}}>{coupon.title}</div>
               {coupon.desc&&<div style={{fontSize:12,fontWeight:600,color:C.textMid,marginTop:1}}>{coupon.desc}</div>}
             </div>
+            <button onClick={()=>setEditingCoupon(coupon)} style={{
+              width:32,height:32,borderRadius:"50%",border:"none",
+              background:"transparent",color:C.textLight,fontSize:16,
+              cursor:"pointer",display:"flex",alignItems:"center",justifyContent:"center",
+              padding:0,flexShrink:0,
+            }} onMouseEnter={e=>{e.currentTarget.style.background=`${C.primary}10`;e.currentTarget.style.color=C.primary}}
+               onMouseLeave={e=>{e.currentTarget.style.background="transparent";e.currentTarget.style.color=C.textLight}}>
+              <svg width="14" height="14" viewBox="0 0 14 14" fill="none"><path d="M8.5 2.5L11.5 5.5M1 13H4L12 5C12.5523 4.44772 12.5523 3.55228 12 3L11 2C10.4477 1.44772 9.55228 1.44772 9 2L1 10V13Z" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round"/></svg>
+            </button>
             <button onClick={()=>setDeleteConfirm(coupon.id)} style={{
               width:32,height:32,borderRadius:"50%",border:"none",
               background:"transparent",color:C.textLight,fontSize:16,
@@ -1244,6 +1261,87 @@ function CouponManagePage({coupons,onBack,onAdd,onDelete}){
 
       {/* Add coupon modal */}
       {showAddModal&&<AddCouponModal onClose={()=>setShowAddModal(false)} onAdd={onAdd}/>}
+      {/* Edit coupon modal */}
+      {editingCoupon&&<EditCouponModal coupon={editingCoupon} onClose={()=>setEditingCoupon(null)} onSave={(updated)=>{onEdit(updated);setEditingCoupon(null);}}/>}
+    </div>
+  );
+}
+
+/* ════════════ EDIT COUPON MODAL ════════════ */
+function EditCouponModal({coupon,onClose,onSave}){
+  const [emoji,setEmoji]=useState(coupon.emoji);
+  const [starCost,setStarCost]=useState(String(coupon.starCost));
+  const [title,setTitle]=useState(coupon.title);
+  const [desc,setDesc]=useState(coupon.desc||"");
+  const inputRef=useRef(null);
+
+  useEffect(()=>{setTimeout(()=>inputRef.current?.focus(),100)},[]);
+
+  const valid=title.trim()&&starCost&&Number(starCost)>0;
+  const handleSave=()=>{
+    if(!valid)return;
+    onSave({...coupon,emoji,starCost:Number(starCost),title:title.trim(),desc:desc.trim()});
+  };
+
+  return(
+    <div onClick={onClose} style={{position:"fixed",inset:0,background:"rgba(45,43,85,.45)",backdropFilter:"blur(6px)",zIndex:1000,display:"flex",alignItems:"flex-end",justifyContent:"center",animation:"fadeIn .2s ease"}}>
+      <div onClick={e=>e.stopPropagation()} style={{width:"100%",maxWidth:420,background:"white",borderRadius:"28px 28px 0 0",padding:"28px 24px 32px",animation:"slideUp .35s cubic-bezier(.22,.68,.36,1.05)"}}>
+        <div style={{width:40,height:4,borderRadius:2,background:C.border,margin:"0 auto 20px"}}/>
+        <h3 style={{margin:"0 0 20px",fontSize:20,fontWeight:800,color:C.textDark,fontFamily:"'Nunito',sans-serif"}}>✏️ 쿠폰 수정</h3>
+
+        <div style={{marginBottom:16}}>
+          <div style={{fontSize:13,fontWeight:700,color:C.textMid,marginBottom:8}}>아이콘 선택</div>
+          <div style={{display:"flex",flexWrap:"wrap",gap:8}}>
+            {COUPON_EMOJI_OPTIONS.map(e=>(
+              <button key={e} onClick={()=>setEmoji(e)} style={{
+                width:40,height:40,borderRadius:12,border:emoji===e?`2.5px solid ${C.primary}`:`1.5px solid ${C.border}`,
+                background:emoji===e?`${C.primary}10`:"white",
+                fontSize:20,cursor:"pointer",display:"flex",alignItems:"center",justifyContent:"center",
+                transition:"all .15s",
+              }}>{e}</button>
+            ))}
+          </div>
+        </div>
+
+        <div style={{marginBottom:14}}>
+          <div style={{fontSize:13,fontWeight:700,color:C.textMid,marginBottom:6}}>필요한 별 갯수</div>
+          <div style={{display:"flex",alignItems:"center",gap:8}}>
+            <span style={{fontSize:20}}>★</span>
+            <input value={starCost} onChange={e=>{const v=e.target.value.replace(/\D/g,"");setStarCost(v);}} placeholder="0" style={{
+              width:80,padding:"12px 16px",borderRadius:14,border:`2px solid ${C.border}`,
+              fontSize:18,fontWeight:800,fontFamily:"'Nunito',sans-serif",color:"#D4A017",
+              outline:"none",background:C.bg,textAlign:"center",
+            }} onFocus={e=>e.target.style.borderColor=C.primary} onBlur={e=>e.target.style.borderColor=C.border}/>
+            <span style={{fontSize:13,fontWeight:600,color:C.textMid}}>개</span>
+          </div>
+        </div>
+
+        <div style={{marginBottom:14}}>
+          <div style={{fontSize:13,fontWeight:700,color:C.textMid,marginBottom:6}}>쿠폰 이름</div>
+          <input ref={inputRef} value={title} onChange={e=>setTitle(e.target.value)} placeholder="예: 간식 선택권" style={{
+            width:"100%",padding:"14px 18px",borderRadius:16,border:`2px solid ${C.border}`,
+            fontSize:15,fontWeight:600,fontFamily:"'Nunito',sans-serif",color:C.textDark,
+            outline:"none",background:C.bg,boxSizing:"border-box",
+          }} onFocus={e=>e.target.style.borderColor=C.primary} onBlur={e=>e.target.style.borderColor=C.border}/>
+        </div>
+
+        <div style={{marginBottom:18}}>
+          <div style={{fontSize:13,fontWeight:700,color:C.textMid,marginBottom:6}}>설명 (선택)</div>
+          <input value={desc} onChange={e=>setDesc(e.target.value)} onKeyDown={e=>e.key==="Enter"&&handleSave()} placeholder="예: 원하는 간식 하나 고르기" style={{
+            width:"100%",padding:"14px 18px",borderRadius:16,border:`2px solid ${C.border}`,
+            fontSize:15,fontWeight:600,fontFamily:"'Nunito',sans-serif",color:C.textDark,
+            outline:"none",background:C.bg,boxSizing:"border-box",
+          }} onFocus={e=>e.target.style.borderColor=C.primary} onBlur={e=>e.target.style.borderColor=C.border}/>
+        </div>
+
+        <button onClick={handleSave} disabled={!valid} style={{
+          width:"100%",padding:"14px",borderRadius:16,border:"none",
+          background:valid?`linear-gradient(135deg,${C.primary},${C.primaryLight})`:C.border,
+          color:valid?"white":C.textLight,fontSize:16,fontWeight:800,
+          fontFamily:"'Nunito',sans-serif",cursor:valid?"pointer":"default",
+          boxShadow:valid?"0 4px 16px rgba(108,99,255,.35)":"none",
+        }}>수정 완료 ✏️</button>
+      </div>
     </div>
   );
 }
@@ -2153,6 +2251,11 @@ export default function FamilyDay() {
   const [authReady,setAuthReady]=useState(false);
   const [dbLoaded,setDbLoaded]=useState(false);
   const [passwordRecovery,setPasswordRecovery]=useState(false);
+  const [todoFilter,setTodoFilter]=useState("all");
+  const [showGnb,setShowGnb]=useState(true);
+  const [showCalAddModal,setShowCalAddModal]=useState(false);
+  const lastScrollY=useRef(0);
+  const scrollRef=useRef(null);
 
   /* ── Supabase: 가족/구성원 로드 ── */
   async function loadFamily(userId){
@@ -2372,6 +2475,36 @@ export default function FamilyDay() {
     setCoupons(p=>p.filter(c=>c.id!==id));
     supabase.from("coupons").delete().eq("id",id).then(()=>{});
   },[]);
+  const editCoupon=useCallback(updated=>{
+    setCoupons(p=>p.map(c=>c.id===updated.id?updated:c).sort((a,b)=>a.starCost-b.starCost));
+    supabase.from("coupons").update({star_cost:updated.starCost,title:updated.title,description:updated.desc,emoji:updated.emoji}).eq("id",updated.id).then(()=>{});
+  },[]);
+
+  /* ── 스크롤 방향 감지 → GNB 숨김/표시 ── */
+  const handleScroll=useCallback(()=>{
+    const el=scrollRef.current;
+    if(!el) return;
+    const y=el.scrollTop;
+    if(y>lastScrollY.current&&y>60) setShowGnb(false);
+    else setShowGnb(true);
+    lastScrollY.current=y;
+  },[]);
+
+  /* ── 연속 달성 일수 계산 ── */
+  const streak=useMemo(()=>{
+    const kidDone=todos.filter(t=>t.owner==="kid"&&t.isDone&&t.doneDate);
+    const doneDates=[...new Set(kidDone.map(t=>t.doneDate))].sort().reverse();
+    if(doneDates.length===0) return 0;
+    let count=0;
+    const d=new Date();
+    for(let i=0;i<60;i++){
+      const key=fmtDateKey(d);
+      if(doneDates.includes(key)){count++;d.setDate(d.getDate()-1);}
+      else if(i===0){d.setDate(d.getDate()-1);continue;} // 오늘 아직 미완료면 어제부터
+      else break;
+    }
+    return count;
+  },[todos]);
 
   /* Show home tab content vs timeline vs calendar */
   const showHome = navTab === "home" && !showCoupon;
@@ -2379,49 +2512,52 @@ export default function FamilyDay() {
   const showCal = navTab === "cal";
 
   return (
-    <div style={{maxWidth:420,margin:"0 auto",minHeight:"100vh",background:C.bg,fontFamily:"'Nunito',sans-serif",position:"relative",overflowX:"hidden"}}>
+    <div style={{maxWidth:420,margin:"0 auto",height:"100vh",background:C.bg,fontFamily:"'Nunito',sans-serif",position:"relative",overflowX:"hidden",display:"flex",flexDirection:"column"}}>
 
-      {/* ─── Status bar ─── */}
-      <div style={{background:`linear-gradient(135deg,${C.primary},${C.primaryLight})`,padding:"12px 20px 0"}}>
-        <div style={{display:"flex",justifyContent:"space-between",alignItems:"center",fontSize:12,fontWeight:700,color:"rgba(255,255,255,.8)",marginBottom:4}}>
-          <span>9:41</span><span style={{fontSize:11}}>⭐ {stars}</span>
+      {/* ─── Sticky Header ─── */}
+      <div style={{position:"sticky",top:0,zIndex:50,flexShrink:0}}>
+        {/* Status bar */}
+        <div style={{background:`linear-gradient(135deg,${C.primary},${C.primaryLight})`,padding:"12px 20px 0"}}>
+          <div style={{display:"flex",justifyContent:"space-between",alignItems:"center",fontSize:12,fontWeight:700,color:"rgba(255,255,255,.8)",marginBottom:4}}>
+            <span>9:41</span><span style={{fontSize:11}}>⭐ {stars}</span>
+          </div>
         </div>
+
+        {/* Header (Home) */}
+        {showHome && (
+          <div style={{background:`linear-gradient(135deg,${C.primary},${C.primaryLight})`,padding:"8px 20px 24px",borderRadius:"0 0 32px 32px",position:"relative",overflow:"hidden"}}>
+            <div style={{position:"absolute",top:-20,right:-20,width:100,height:100,borderRadius:"50%",background:"rgba(255,255,255,.07)"}}/>
+            <div style={{position:"absolute",bottom:-30,left:40,width:70,height:70,borderRadius:"50%",background:"rgba(255,255,255,.05)"}}/>
+            <div style={{display:"flex",alignItems:"center",justifyContent:"space-between"}}>
+              <div>
+                <h1 style={{margin:0,fontSize:13,fontWeight:700,color:"rgba(255,255,255,.7)",letterSpacing:1.5,textTransform:"uppercase"}}>FamilyDay</h1>
+                <h2 style={{margin:"4px 0 2px",fontSize:22,fontWeight:900,color:"white"}}>안녕, {kidName}네 가족! 👋</h2>
+                <p style={{margin:0,fontSize:13,color:"rgba(255,255,255,.7)",fontWeight:600}}>{dateStr}</p>
+              </div>
+              <CuteFace size={48} style={{border:"3px solid rgba(255,255,255,.3)"}}/>
+            </div>
+          </div>
+        )}
+
+        {/* Header (Timeline / Family) */}
+        {(showTimeline || navTab==="family") && (
+          <div style={{background:`linear-gradient(135deg,${C.primary},${C.primaryLight})`,padding:"8px 20px 20px",borderRadius:"0 0 32px 32px"}}/>
+        )}
+
+        {/* Header (Calendar) */}
+        {showCal && (
+          <div style={{background:`linear-gradient(135deg,${C.primary},${C.primaryLight})`,padding:"8px 20px 24px",borderRadius:"0 0 32px 32px"}}>
+            <div style={{display:"flex",gap:6,marginTop:4,background:"rgba(255,255,255,.15)",borderRadius:999,padding:4}}>
+              {[["daily","일간"],["weekly","주간"],["monthly","월간"]].map(([k,label])=>(
+                <button key={k} onClick={()=>setCalTab(k)} style={{flex:1,padding:"8px 0",borderRadius:999,border:"none",background:calTab===k?"white":"transparent",color:calTab===k?C.primary:"rgba(255,255,255,.8)",fontSize:13,fontWeight:800,fontFamily:"'Nunito',sans-serif",cursor:"pointer",transition:"all .25s"}}>{label}</button>
+              ))}
+            </div>
+          </div>
+        )}
       </div>
 
-      {/* ─── Header (Home) ─── */}
-      {showHome && (
-        <div style={{background:`linear-gradient(135deg,${C.primary},${C.primaryLight})`,padding:"8px 20px 24px",borderRadius:"0 0 32px 32px",position:"relative",overflow:"hidden"}}>
-          <div style={{position:"absolute",top:-20,right:-20,width:100,height:100,borderRadius:"50%",background:"rgba(255,255,255,.07)"}}/>
-          <div style={{position:"absolute",bottom:-30,left:40,width:70,height:70,borderRadius:"50%",background:"rgba(255,255,255,.05)"}}/>
-          <div style={{display:"flex",alignItems:"center",justifyContent:"space-between"}}>
-            <div>
-              <h1 style={{margin:0,fontSize:13,fontWeight:700,color:"rgba(255,255,255,.7)",letterSpacing:1.5,textTransform:"uppercase"}}>FamilyDay</h1>
-              <h2 style={{margin:"4px 0 2px",fontSize:22,fontWeight:900,color:"white"}}>안녕, {kidName}네 가족! 👋</h2>
-              <p style={{margin:0,fontSize:13,color:"rgba(255,255,255,.7)",fontWeight:600}}>{dateStr}</p>
-            </div>
-            <CuteFace size={48} style={{border:"3px solid rgba(255,255,255,.3)"}}/>
-          </div>
-        </div>
-      )}
-
-      {/* ─── Header (Timeline / Family) ─── */}
-      {(showTimeline || navTab==="family") && (
-        <div style={{background:`linear-gradient(135deg,${C.primary},${C.primaryLight})`,padding:"8px 20px 20px",borderRadius:"0 0 32px 32px"}}/>
-      )}
-
-      {/* ─── Header (Calendar) ─── */}
-      {showCal && (
-        <div style={{background:`linear-gradient(135deg,${C.primary},${C.primaryLight})`,padding:"8px 20px 24px",borderRadius:"0 0 32px 32px"}}>
-          <div style={{display:"flex",gap:6,marginTop:4,background:"rgba(255,255,255,.15)",borderRadius:999,padding:4}}>
-            {[["daily","일간"],["weekly","주간"],["monthly","월간"]].map(([k,label])=>(
-              <button key={k} onClick={()=>setCalTab(k)} style={{flex:1,padding:"8px 0",borderRadius:999,border:"none",background:calTab===k?"white":"transparent",color:calTab===k?C.primary:"rgba(255,255,255,.8)",fontSize:13,fontWeight:800,fontFamily:"'Nunito',sans-serif",cursor:"pointer",transition:"all .25s"}}>{label}</button>
-            ))}
-          </div>
-        </div>
-      )}
-
-      {/* ─── Content ─── */}
-      <div style={{padding:"20px 16px 100px",opacity:mounted?1:0,transition:"opacity .4s ease"}}>
+      {/* ─── Scrollable Content ─── */}
+      <div ref={scrollRef} onScroll={handleScroll} style={{flex:1,overflowY:"auto",padding:"20px 16px 100px",opacity:mounted?1:0,transition:"opacity .4s ease"}}>
 
         {/* ═══ HOME ═══ */}
         {showHome && (
@@ -2436,18 +2572,43 @@ export default function FamilyDay() {
                 </div>
               ))}
             </div>
+            {/* 연속 달성 배너 */}
+            {streak>=2&&(
+              <div style={{background:"linear-gradient(135deg,#FFF0E0,#FFE4CC)",borderRadius:20,padding:"14px 20px",marginBottom:16,display:"flex",alignItems:"center",gap:12,boxShadow:"0 4px 16px rgba(255,160,80,.12)",animation:"slideUp .5s .12s ease both"}}>
+                <span style={{fontSize:28}}>🔥</span>
+                <div>
+                  <div style={{fontSize:15,fontWeight:900,color:"#E8600A",fontFamily:"'Nunito',sans-serif"}}>{streak}일 연속 달성!</div>
+                  <div style={{fontSize:12,fontWeight:600,color:"#C07020"}}>꾸준히 잘하고 있어요!</div>
+                </div>
+              </div>
+            )}
             <div style={{background:"white",borderRadius:20,padding:"18px 20px",boxShadow:"0 4px 20px rgba(108,99,255,.08)",animation:"slideUp .5s .15s ease both"}}>
-              <h3 style={{margin:"0 0 16px",fontSize:16,fontWeight:800,color:C.textDark,display:"flex",alignItems:"center",gap:8}}>📋 할 일 보드</h3>
-              <div style={{marginBottom:20}}>
+              <div style={{display:"flex",alignItems:"center",justifyContent:"space-between",marginBottom:14}}>
+                <h3 style={{margin:0,fontSize:16,fontWeight:800,color:C.textDark,display:"flex",alignItems:"center",gap:8}}>📋 할 일 보드</h3>
+                <div style={{display:"flex",gap:4}}>
+                  {[["all","전체"],["mom","👩 엄마"],["kid",`🧒 ${kidName}`]].map(([k,label])=>(
+                    <button key={k} onClick={()=>setTodoFilter(k)} style={{
+                      padding:"4px 10px",borderRadius:999,border:"none",
+                      background:todoFilter===k?C.primary:`${C.primary}08`,
+                      color:todoFilter===k?"white":C.textMid,
+                      fontSize:11,fontWeight:700,fontFamily:"'Nunito',sans-serif",
+                      cursor:"pointer",transition:"all .15s",
+                    }}>{label}</button>
+                  ))}
+                </div>
+              </div>
+              {(todoFilter==="all"||todoFilter==="mom")&&(
+              <div style={{marginBottom:todoFilter==="all"?20:0}}>
                 <span style={{display:"inline-block",padding:"4px 14px",borderRadius:999,background:`${C.momTag}15`,border:`1.5px solid ${C.momTag}40`,color:C.momTag,fontSize:12,fontWeight:800,marginBottom:8}}>👩 엄마</span>
                 {momTodos.map(t=><TodoItem key={t.id} item={t} onToggle={toggleTodo} onDelete={deleteTodo} onEdit={setEditingTodo}/>)}
                 {momTodos.length===0&&<p style={{color:C.textLight,fontSize:14,fontWeight:600,padding:"12px 0",textAlign:"center"}}>아직 할 일이 없어요! ✨</p>}
-              </div>
+              </div>)}
+              {(todoFilter==="all"||todoFilter==="kid")&&(
               <div>
                 <span style={{display:"inline-block",padding:"4px 14px",borderRadius:999,background:`${C.kidTag}15`,border:`1.5px solid ${C.kidTag}40`,color:C.kidTag,fontSize:12,fontWeight:800,marginBottom:8}}>🧒 {kidName}</span>
                 {kidTodos.map(t=><TodoItem key={t.id} item={t} onToggle={toggleTodo} onDelete={deleteTodo} onEdit={setEditingTodo}/>)}
                 {kidTodos.length===0&&<p style={{color:C.textLight,fontSize:14,fontWeight:600,padding:"12px 0",textAlign:"center"}}>다 했어요! 🎉</p>}
-              </div>
+              </div>)}
             </div>
             <div onClick={()=>setShowCoupon(true)} style={{marginTop:16,background:"linear-gradient(135deg,#FFF9E0,#FFF3CC)",borderRadius:20,padding:"16px 20px",display:"flex",alignItems:"center",gap:14,boxShadow:"0 4px 16px rgba(255,215,0,.15)",animation:"slideUp .5s .25s ease both",cursor:"pointer",transition:"transform .2s"}} onMouseEnter={e=>e.currentTarget.style.transform="scale(1.02)"} onMouseLeave={e=>e.currentTarget.style.transform="scale(1)"}>
               <div style={{width:44,height:44,borderRadius:14,background:"linear-gradient(135deg,#FFD700,#FFE44D)",display:"flex",alignItems:"center",justifyContent:"center",fontSize:22,boxShadow:"0 3px 10px rgba(255,215,0,.3)"}}>⭐</div>
@@ -2514,20 +2675,29 @@ export default function FamilyDay() {
             : <AuthPage onLogin={handleLogin} passwordRecovery={passwordRecovery} onRecoveryDone={()=>setPasswordRecovery(false)}/>
         )}
         {navTab==="family"&&showCouponManage&&(
-          <CouponManagePage coupons={coupons} onBack={()=>setShowCouponManage(false)} onAdd={addCoupon} onDelete={deleteCoupon}/>
+          <CouponManagePage coupons={coupons} onBack={()=>setShowCouponManage(false)} onAdd={addCoupon} onDelete={deleteCoupon} onEdit={editCoupon}/>
         )}
       </div>
 
       {/* Floating add — home only */}
       {showHome && (
-        <button onClick={()=>setShowModal(true)} style={{position:"fixed",bottom:88,left:"50%",transform:"translateX(-50%)",padding:"12px 28px",borderRadius:999,border:"none",background:`linear-gradient(135deg,${C.primary},${C.primaryLight})`,color:"white",fontSize:15,fontWeight:800,fontFamily:"'Nunito',sans-serif",cursor:"pointer",boxShadow:"0 6px 24px rgba(108,99,255,.4)",zIndex:100,display:"flex",alignItems:"center",gap:8,animation:"pulseGlow 2.5s infinite",transition:"transform .2s"}}
+        <button onClick={()=>setShowModal(true)} style={{position:"fixed",bottom:showGnb?88:24,left:"50%",transform:"translateX(-50%)",padding:"12px 28px",borderRadius:999,border:"none",background:`linear-gradient(135deg,${C.primary},${C.primaryLight})`,color:"white",fontSize:15,fontWeight:800,fontFamily:"'Nunito',sans-serif",cursor:"pointer",boxShadow:"0 6px 24px rgba(108,99,255,.4)",zIndex:100,display:"flex",alignItems:"center",gap:8,animation:"pulseGlow 2.5s infinite",transition:"all .3s"}}
           onMouseEnter={e=>e.currentTarget.style.transform="translateX(-50%) scale(1.06)"}
           onMouseLeave={e=>e.currentTarget.style.transform="translateX(-50%) scale(1)"}
         ><span style={{fontSize:18}}>+</span> 할 일 추가</button>
       )}
 
+      {/* Floating add — calendar */}
+      {showCal && (
+        <button onClick={()=>setShowCalAddModal(true)} style={{position:"fixed",bottom:showGnb?88:24,left:"50%",transform:"translateX(-50%)",padding:"12px 28px",borderRadius:999,border:"none",background:`linear-gradient(135deg,${C.primary},${C.primaryLight})`,color:"white",fontSize:15,fontWeight:800,fontFamily:"'Nunito',sans-serif",cursor:"pointer",boxShadow:"0 6px 24px rgba(108,99,255,.4)",zIndex:100,display:"flex",alignItems:"center",gap:8,transition:"all .3s"}}
+          onMouseEnter={e=>e.currentTarget.style.transform="translateX(-50%) scale(1.06)"}
+          onMouseLeave={e=>e.currentTarget.style.transform="translateX(-50%) scale(1)"}
+        ><span style={{fontSize:18}}>+</span> 일정 추가</button>
+      )}
+      {showCalAddModal&&<AddEventModal onClose={()=>setShowCalAddModal(false)} onAdd={addEvent} initialDate=""/>}
+
       {/* Bottom nav */}
-      <div style={{position:"fixed",bottom:0,left:"50%",transform:"translateX(-50%)",width:"100%",maxWidth:420,background:"white",borderRadius:"24px 24px 0 0",padding:"10px 12px 18px",display:"flex",justifyContent:"space-around",boxShadow:"0 -4px 20px rgba(108,99,255,.08)",zIndex:99}}>
+      <div style={{position:"fixed",bottom:showGnb?0:-80,left:"50%",transform:"translateX(-50%)",width:"100%",maxWidth:420,background:"white",borderRadius:"24px 24px 0 0",padding:"10px 12px 18px",display:"flex",justifyContent:"space-around",boxShadow:"0 -4px 20px rgba(108,99,255,.08)",zIndex:99,transition:"bottom .3s ease"}}>
         {[
           {key:"home",label:"홈",icon:NavIcons.home},
           {key:"cal",label:"캘린더",icon:NavIcons.calendar},
