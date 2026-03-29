@@ -1394,6 +1394,9 @@ function AuthPage({ onLogin, passwordRecovery, onRecoveryDone }){
       const { data, error: authError } = await supabase.auth.signUp({
         email: email.trim(),
         password,
+        options: {
+          emailRedirectTo: window.location.origin,
+        },
       });
       setLoading(false);
       if(authError){
@@ -1435,7 +1438,9 @@ function AuthPage({ onLogin, passwordRecovery, onRecoveryDone }){
     if(!email.trim()) return setError("이메일을 입력해주세요");
     if(!/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(email)) return setError("올바른 이메일 형식이 아니에요");
     setLoading(true);
-    const { error: resetError } = await supabase.auth.resetPasswordForEmail(email.trim());
+    const { error: resetError } = await supabase.auth.resetPasswordForEmail(email.trim(), {
+      redirectTo: window.location.origin + '/familyday-app/',
+    });
     setLoading(false);
     if(resetError){
       if(resetError.status===429) return setError("요청이 너무 많아요. 잠시 후 다시 시도해주세요.");
@@ -2200,9 +2205,27 @@ export default function FamilyDay() {
         localStorage.setItem("fd_user",JSON.stringify(merged));
       }
     }
-    supabase.auth.getSession().then(({data:{session}})=>{
-      handleSession(session).then(()=>setAuthReady(true));
-    });
+    // URL에 token_hash가 있으면 이메일 인증 처리 (GitHub Pages 404 리다이렉트 대응)
+    const params = new URLSearchParams(window.location.search);
+    const tokenHash = params.get("token_hash");
+    const type = params.get("type");
+    if(tokenHash && type){
+      supabase.auth.verifyOtp({token_hash:tokenHash,type}).then(({error})=>{
+        // 인증 처리 후 URL 정리
+        window.history.replaceState(null,"",window.location.pathname);
+        if(!error){
+          supabase.auth.getSession().then(({data:{session}})=>{
+            handleSession(session).then(()=>setAuthReady(true));
+          });
+        } else {
+          setAuthReady(true);
+        }
+      });
+    } else {
+      supabase.auth.getSession().then(({data:{session}})=>{
+        handleSession(session).then(()=>setAuthReady(true));
+      });
+    }
     const {data:{subscription}}=supabase.auth.onAuthStateChange((event,session)=>{
       if(event==="PASSWORD_RECOVERY"){
         setPasswordRecovery(true);

@@ -1,0 +1,19 @@
+<!DOCTYPE html>
+<html>
+<head>
+  <meta charset="utf-8">
+  <title>FamilyDay</title>
+  <script>
+    // GitHub Pages SPA fallback
+    // /familyday-app/auth/confirm?token_hash=xxx&type=email 같은 경로를
+    // /familyday-app/?token_hash=xxx&type=email 로 리다이렉트
+    var l = window.location;
+    var base = '/familyday-app/';
+    l.replace(
+      l.protocol + '//' + l.hostname + (l.port ? ':' + l.port : '') +
+      base + l.search + l.hash
+    );
+  </script>
+</head>
+<body></body>
+</html>
