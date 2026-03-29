@@ -2174,8 +2174,10 @@ export default function FamilyDay() {
         }
       }
       if(!familyId){
-        const {data:newFamily}=await supabase.from("families").insert({name:"우리 가족"}).select("id").single();
-        familyId=newFamily.id;
+        // 클라이언트에서 UUID 생성 — RLS SELECT 정책(get_my_family_id)이
+        // family_members 등록 전이라 insert().select() 조회 불가하므로
+        familyId=crypto.randomUUID();
+        await supabase.from("families").insert({id:familyId,name:"우리 가족"});
         const {data:{user:authUser}}=await supabase.auth.getUser();
         await supabase.from("family_members").insert({family_id:familyId,user_id:userId,name:authUser.email.split("@")[0],role:"부모",emoji:"👩"});
       }
@@ -2192,17 +2194,25 @@ export default function FamilyDay() {
         const u=session.user;
         const stored=localStorage.getItem("fd_user");
         const prev=stored?JSON.parse(stored):null;
-        const {familyId,members}=await loadFamily(u.id);
-        const merged={
-          id:u.id,
-          email:u.email,
-          nickname:prev?.nickname||u.email.split("@")[0],
-          photo:prev?.photo||null,
-          familyId,
-          members,
-        };
-        setUser(merged);
-        localStorage.setItem("fd_user",JSON.stringify(merged));
+        try{
+          const {familyId,members}=await loadFamily(u.id);
+          const merged={
+            id:u.id,
+            email:u.email,
+            nickname:prev?.nickname||u.email.split("@")[0],
+            photo:prev?.photo||null,
+            familyId,
+            members,
+          };
+          setUser(merged);
+          localStorage.setItem("fd_user",JSON.stringify(merged));
+        }catch(e){
+          console.error("loadFamily 실패:",e);
+          // 가족 로드 실패해도 기본 정보로 로그인 허용
+          const fallback={id:u.id,email:u.email,nickname:prev?.nickname||u.email.split("@")[0],photo:prev?.photo||null,familyId:null,members:[]};
+          setUser(fallback);
+          localStorage.setItem("fd_user",JSON.stringify(fallback));
+        }
       }
     }
     // URL에 token_hash가 있으면 이메일 인증 처리 (GitHub Pages 404 리다이렉트 대응)
