@@ -1360,13 +1360,17 @@ const INITIAL_FAMILY_MEMBERS = [
   { id:"fm2", name:"엄마", role:"부모", emoji:"👩" },
 ];
 
-function AuthPage({ onLogin }){
+function AuthPage({ onLogin, passwordRecovery, onRecoveryDone }){
   const [email, setEmail] = useState("");
   const [password, setPassword] = useState("");
   const [isSignUp, setIsSignUp] = useState(false);
   const [error, setError] = useState("");
   const [loading, setLoading] = useState(false);
   const [signUpDone, setSignUpDone] = useState(false);
+  const [forgotPassword, setForgotPassword] = useState(false);
+  const [resetSent, setResetSent] = useState(false);
+  const [newPassword, setNewPassword] = useState("");
+  const [confirmPassword, setConfirmPassword] = useState("");
 
   const inputStyle = {
     width:"100%",padding:"14px 16px",borderRadius:14,
@@ -1415,6 +1419,83 @@ function AuthPage({ onLogin }){
     }
   };
 
+  const handleForgotPassword = async () => {
+    setError("");
+    if(!email.trim()) return setError("이메일을 입력해주세요");
+    if(!/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(email)) return setError("올바른 이메일 형식이 아니에요");
+    setLoading(true);
+    const { error: resetError } = await supabase.auth.resetPasswordForEmail(email.trim());
+    setLoading(false);
+    if(resetError){
+      if(resetError.status===429) return setError("요청이 너무 많아요. 잠시 후 다시 시도해주세요.");
+      return setError("메일 발송에 실패했어요. 다시 시도해주세요.");
+    }
+    setResetSent(true);
+  };
+
+  const handleNewPassword = async () => {
+    setError("");
+    if(!newPassword) return setError("새 비밀번호를 입력해주세요");
+    if(newPassword.length < 6) return setError("비밀번호는 6자 이상이어야 해요");
+    if(newPassword !== confirmPassword) return setError("비밀번호가 일치하지 않아요");
+    setLoading(true);
+    const { error: updateError } = await supabase.auth.updateUser({ password: newPassword });
+    setLoading(false);
+    if(updateError){
+      if(updateError.status===429) return setError("요청이 너무 많아요. 잠시 후 다시 시도해주세요.");
+      return setError("비밀번호 변경에 실패했어요. 다시 시도해주세요.");
+    }
+    onRecoveryDone?.();
+  };
+
+  // 비밀번호 재설정 (리셋 링크로 접속한 경우)
+  if(passwordRecovery){
+    return(
+      <div style={{animation:"slideUp .4s ease both"}}>
+        <div style={{textAlign:"center",marginBottom:28}}>
+          <div style={{fontSize:56,marginBottom:8}}>🔐</div>
+          <h2 style={{margin:0,fontSize:22,fontWeight:900,color:C.textDark,fontFamily:"'Nunito',sans-serif"}}>FamilyDay</h2>
+          <p style={{margin:"6px 0 0",fontSize:13,fontWeight:600,color:C.textMid}}>가족과 함께하는 하루</p>
+        </div>
+        <div style={{background:"white",borderRadius:20,padding:"24px 20px",boxShadow:"0 4px 20px rgba(108,99,255,.08)"}}>
+          <h3 style={{margin:"0 0 6px",fontSize:18,fontWeight:800,color:C.textDark,fontFamily:"'Nunito',sans-serif"}}>
+            새 비밀번호 설정
+          </h3>
+          <p style={{margin:"0 0 20px",fontSize:13,fontWeight:600,color:C.textMid}}>
+            새로운 비밀번호를 입력해주세요
+          </p>
+          <label style={{fontSize:12,fontWeight:700,color:C.textMid,marginBottom:6,display:"block"}}>새 비밀번호</label>
+          <input type="password" value={newPassword} onChange={e=>setNewPassword(e.target.value)}
+            placeholder="6자 이상 입력해주세요"
+            style={{...inputStyle,marginBottom:14}}
+            onFocus={e=>e.target.style.borderColor=C.primary}
+            onBlur={e=>e.target.style.borderColor=C.border}
+          />
+          <label style={{fontSize:12,fontWeight:700,color:C.textMid,marginBottom:6,display:"block"}}>비밀번호 확인</label>
+          <input type="password" value={confirmPassword} onChange={e=>setConfirmPassword(e.target.value)}
+            placeholder="비밀번호를 다시 입력해주세요"
+            style={{...inputStyle,marginBottom:4}}
+            onFocus={e=>e.target.style.borderColor=C.primary}
+            onBlur={e=>e.target.style.borderColor=C.border}
+            onKeyDown={e=>e.key==="Enter"&&handleNewPassword()}
+          />
+          {error&&(
+            <div style={{marginTop:12,padding:"10px 14px",borderRadius:12,background:"#FFF0F0",border:"1.5px solid #FFB4B4",fontSize:13,fontWeight:700,color:C.secondary,fontFamily:"'Nunito',sans-serif"}}>
+              {error}
+            </div>
+          )}
+          <button onClick={handleNewPassword} disabled={loading} style={{
+            width:"100%",padding:"14px",borderRadius:16,border:"none",marginTop:18,
+            background:loading?"#B0ADE0":`linear-gradient(135deg,${C.primary},${C.primaryLight})`,
+            color:"white",fontSize:16,fontWeight:800,fontFamily:"'Nunito',sans-serif",
+            cursor:loading?"not-allowed":"pointer",boxShadow:"0 4px 16px rgba(108,99,255,.35)",transition:"all .2s",
+            opacity:loading?.7:1,
+          }}>{loading?"변경 중...":"비밀번호 변경"}</button>
+        </div>
+      </div>
+    );
+  }
+
   return(
     <div style={{animation:"slideUp .4s ease both"}}>
       <div style={{textAlign:"center",marginBottom:28}}>
@@ -1425,7 +1506,65 @@ function AuthPage({ onLogin }){
 
       <div style={{background:"white",borderRadius:20,padding:"24px 20px",boxShadow:"0 4px 20px rgba(108,99,255,.08)"}}>
 
-        {signUpDone ? (
+        {resetSent ? (
+          <div style={{textAlign:"center",animation:"slideUp .3s ease both"}}>
+            <div style={{
+              width:64,height:64,borderRadius:"50%",margin:"0 auto 16px",
+              background:`linear-gradient(135deg,${C.accent}20,${C.accent}10)`,
+              display:"flex",alignItems:"center",justifyContent:"center",fontSize:30,
+            }}>✉️</div>
+            <h3 style={{margin:"0 0 8px",fontSize:18,fontWeight:800,color:C.textDark,fontFamily:"'Nunito',sans-serif"}}>
+              비밀번호 재설정 메일을 보냈어요
+            </h3>
+            <p style={{margin:"0 0 4px",fontSize:14,fontWeight:600,color:C.textMid}}>
+              <span style={{color:C.primary,fontWeight:800}}>{email}</span>
+            </p>
+            <p style={{margin:"0 0 24px",fontSize:13,fontWeight:600,color:C.textLight}}>
+              으로 재설정 링크를 보냈어요
+            </p>
+            <button onClick={()=>{setResetSent(false);setForgotPassword(false);setPassword("");}} style={{
+              width:"100%",padding:"12px",borderRadius:14,border:"none",
+              background:`linear-gradient(135deg,${C.primary},${C.primaryLight})`,
+              color:"white",fontSize:14,fontWeight:700,
+              fontFamily:"'Nunito',sans-serif",cursor:"pointer",transition:"all .15s",
+              boxShadow:"0 4px 16px rgba(108,99,255,.35)",
+            }}>로그인으로 돌아가기</button>
+          </div>
+        ) : forgotPassword ? (
+          <div style={{animation:"slideUp .3s ease both"}}>
+            <h3 style={{margin:"0 0 6px",fontSize:18,fontWeight:800,color:C.textDark,fontFamily:"'Nunito',sans-serif"}}>
+              비밀번호 재설정
+            </h3>
+            <p style={{margin:"0 0 20px",fontSize:13,fontWeight:600,color:C.textMid}}>
+              가입한 이메일을 입력하면 재설정 링크를 보내드려요
+            </p>
+            <label style={{fontSize:12,fontWeight:700,color:C.textMid,marginBottom:6,display:"block"}}>이메일</label>
+            <input type="email" value={email} onChange={e=>setEmail(e.target.value)}
+              placeholder="example@email.com"
+              style={{...inputStyle,marginBottom:4}}
+              onFocus={e=>e.target.style.borderColor=C.primary}
+              onBlur={e=>e.target.style.borderColor=C.border}
+              onKeyDown={e=>e.key==="Enter"&&handleForgotPassword()}
+            />
+            {error&&(
+              <div style={{marginTop:12,padding:"10px 14px",borderRadius:12,background:"#FFF0F0",border:"1.5px solid #FFB4B4",fontSize:13,fontWeight:700,color:C.secondary,fontFamily:"'Nunito',sans-serif"}}>
+                {error}
+              </div>
+            )}
+            <button onClick={handleForgotPassword} disabled={loading} style={{
+              width:"100%",padding:"14px",borderRadius:16,border:"none",marginTop:18,
+              background:loading?"#B0ADE0":`linear-gradient(135deg,${C.primary},${C.primaryLight})`,
+              color:"white",fontSize:16,fontWeight:800,fontFamily:"'Nunito',sans-serif",
+              cursor:loading?"not-allowed":"pointer",boxShadow:"0 4px 16px rgba(108,99,255,.35)",transition:"all .2s",
+              opacity:loading?.7:1,
+            }}>{loading?"발송 중...":"재설정 링크 보내기"}</button>
+            <button onClick={()=>{setForgotPassword(false);setError("");}} style={{
+              width:"100%",padding:"12px",borderRadius:14,border:"none",marginTop:10,
+              background:"transparent",color:C.textMid,fontSize:14,fontWeight:700,
+              fontFamily:"'Nunito',sans-serif",cursor:"pointer",
+            }}>로그인으로 돌아가기</button>
+          </div>
+        ) : signUpDone ? (
           <div style={{textAlign:"center",animation:"slideUp .3s ease both"}}>
             <div style={{
               width:64,height:64,borderRadius:"50%",margin:"0 auto 16px",
@@ -1487,6 +1626,16 @@ function AuthPage({ onLogin }){
           onBlur={e=>e.target.style.borderColor=C.border}
           onKeyDown={e=>e.key==="Enter"&&handleSubmit()}
         />
+
+        {!isSignUp&&(
+          <div style={{textAlign:"right",marginTop:6}}>
+            <button onClick={()=>{setForgotPassword(true);setError("");}} style={{
+              background:"none",border:"none",padding:0,
+              fontSize:12,fontWeight:700,color:C.primary,
+              fontFamily:"'Nunito',sans-serif",cursor:"pointer",
+            }}>비밀번호를 잊으셨나요?</button>
+          </div>
+        )}
 
         {error&&(
           <div style={{marginTop:12,padding:"10px 14px",borderRadius:12,background:"#FFF0F0",border:"1.5px solid #FFB4B4",fontSize:13,fontWeight:700,color:C.secondary,fontFamily:"'Nunito',sans-serif"}}>
@@ -1907,6 +2056,7 @@ export default function FamilyDay() {
   const [user,setUser]=useState(null);
   const [authReady,setAuthReady]=useState(false);
   const [dbLoaded,setDbLoaded]=useState(false);
+  const [passwordRecovery,setPasswordRecovery]=useState(false);
 
   /* ── Supabase: 가족/구성원 로드 ── */
   async function loadFamily(userId){
@@ -1949,7 +2099,10 @@ export default function FamilyDay() {
     supabase.auth.getSession().then(({data:{session}})=>{
       handleSession(session).then(()=>setAuthReady(true));
     });
-    const {data:{subscription}}=supabase.auth.onAuthStateChange((_event,session)=>{
+    const {data:{subscription}}=supabase.auth.onAuthStateChange((event,session)=>{
+      if(event==="PASSWORD_RECOVERY"){
+        setPasswordRecovery(true);
+      }
       if(session?.user){
         handleSession(session);
       } else {
@@ -2203,11 +2356,25 @@ export default function FamilyDay() {
         {/* ═══ CALENDAR: MONTHLY ═══ */}
         {showCal && calTab==="monthly"&&<MonthlyCalendar events={events} onAddEvent={addEvent}/>}
 
+        {/* ═══ PASSWORD RECOVERY OVERLAY ═══ */}
+        {passwordRecovery&&user&&(
+          <div style={{
+            position:"fixed",inset:0,background:"rgba(45,43,85,.45)",
+            backdropFilter:"blur(6px)",zIndex:1000,display:"flex",
+            alignItems:"center",justifyContent:"center",animation:"fadeIn .2s ease",
+            padding:20,
+          }}>
+            <div style={{width:"100%",maxWidth:420}}>
+              <AuthPage onLogin={handleLogin} passwordRecovery={passwordRecovery} onRecoveryDone={()=>setPasswordRecovery(false)}/>
+            </div>
+          </div>
+        )}
+
         {/* ═══ FAMILY ═══ */}
         {navTab==="family"&&!showCouponManage&&(
           user
             ? <MyPage user={user} onUpdate={handleUpdateUser} onLogout={handleLogout} onCouponManage={()=>setShowCouponManage(true)}/>
-            : <AuthPage onLogin={handleLogin}/>
+            : <AuthPage onLogin={handleLogin} passwordRecovery={passwordRecovery} onRecoveryDone={()=>setPasswordRecovery(false)}/>
         )}
         {navTab==="family"&&showCouponManage&&(
           <CouponManagePage coupons={coupons} onBack={()=>setShowCouponManage(false)} onAdd={addCoupon} onDelete={deleteCoupon}/>
