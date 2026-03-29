@@ -1371,6 +1371,9 @@ function AuthPage({ onLogin, passwordRecovery, onRecoveryDone }){
   const [resetSent, setResetSent] = useState(false);
   const [newPassword, setNewPassword] = useState("");
   const [confirmPassword, setConfirmPassword] = useState("");
+  const [signUpInviteCode, setSignUpInviteCode] = useState("");
+  const [signUpRole, setSignUpRole] = useState("부모");
+  const [signUpEmoji, setSignUpEmoji] = useState("👩");
 
   const inputStyle = {
     width:"100%",padding:"14px 16px",borderRadius:14,
@@ -1399,6 +1402,14 @@ function AuthPage({ onLogin, passwordRecovery, onRecoveryDone }){
         return setError("회원가입에 실패했어요. 다시 시도해주세요.");
       }
       if(data?.user?.identities?.length===0) return setError("이미 가입된 이메일이에요. 로그인해주세요.");
+      // 초대 코드가 있으면 로그인 시 사용하도록 저장
+      if(signUpInviteCode.trim()){
+        localStorage.setItem("fd_pending_invite",JSON.stringify({
+          code:signUpInviteCode.trim().toUpperCase(),
+          role:signUpRole,
+          emoji:signUpEmoji,
+        }));
+      }
       if(data?.session){
         // 이메일 확인 없이 바로 로그인된 경우 (Confirm email OFF)
         return;
@@ -1637,6 +1648,54 @@ function AuthPage({ onLogin, passwordRecovery, onRecoveryDone }){
           </div>
         )}
 
+        {isSignUp&&(
+          <div style={{marginTop:16,padding:"16px",borderRadius:14,background:C.bg,border:`1.5px solid ${C.border}`}}>
+            <label style={{fontSize:12,fontWeight:700,color:C.textMid,marginBottom:6,display:"block"}}>
+              초대 코드 <span style={{fontWeight:600,color:C.textLight}}>(선택)</span>
+            </label>
+            <input value={signUpInviteCode} onChange={e=>setSignUpInviteCode(e.target.value)}
+              placeholder="초대 코드가 있으면 입력 (예: FD-A3K9)"
+              style={{...inputStyle,background:"white",marginBottom:signUpInviteCode.trim()?12:0,textTransform:"uppercase",letterSpacing:1}}
+              onFocus={e=>e.target.style.borderColor=C.primary}
+              onBlur={e=>e.target.style.borderColor=C.border}
+            />
+            {signUpInviteCode.trim()&&(
+              <div>
+                <label style={{fontSize:12,fontWeight:700,color:C.textMid,marginBottom:6,display:"block"}}>역할</label>
+                <div style={{display:"flex",gap:6,marginBottom:12,flexWrap:"wrap"}}>
+                  {["부모","아이","조부모","반려동물"].map(r=>(
+                    <button key={r} onClick={()=>{
+                      setSignUpRole(r);
+                      if(r==="아이") setSignUpEmoji("👦");
+                      else if(r==="조부모") setSignUpEmoji("👴");
+                      else if(r==="반려동물") setSignUpEmoji("🐶");
+                      else setSignUpEmoji("👩");
+                    }} style={{
+                      padding:"6px 12px",borderRadius:999,border:"none",
+                      background:signUpRole===r?C.primary:`${C.primary}08`,
+                      color:signUpRole===r?"white":C.textMid,
+                      fontSize:12,fontWeight:700,fontFamily:"'Nunito',sans-serif",
+                      cursor:"pointer",transition:"all .15s",
+                    }}>{r}</button>
+                  ))}
+                </div>
+                <label style={{fontSize:12,fontWeight:700,color:C.textMid,marginBottom:6,display:"block"}}>아이콘</label>
+                <div style={{display:"flex",gap:6,flexWrap:"wrap"}}>
+                  {["👦","👧","👨","👩","👴","👵","🐶","🐱"].map(em=>(
+                    <button key={em} onClick={()=>setSignUpEmoji(em)} style={{
+                      width:36,height:36,borderRadius:10,border:"none",
+                      background:signUpEmoji===em?`${C.primary}15`:"white",
+                      fontSize:18,cursor:"pointer",transition:"all .15s",
+                      outline:signUpEmoji===em?`2.5px solid ${C.primary}`:"2px solid transparent",
+                      display:"flex",alignItems:"center",justifyContent:"center",
+                    }}>{em}</button>
+                  ))}
+                </div>
+              </div>
+            )}
+          </div>
+        )}
+
         {error&&(
           <div style={{marginTop:12,padding:"10px 14px",borderRadius:12,background:"#FFF0F0",border:"1.5px solid #FFB4B4",fontSize:13,fontWeight:700,color:C.secondary,fontFamily:"'Nunito',sans-serif"}}>
             {error}
@@ -1766,6 +1825,8 @@ function MyPage({ user, onUpdate, onLogout, onCouponManage }){
   const [inviteCode, setInviteCode] = useState(null);
   const [showJoinInput, setShowJoinInput] = useState(false);
   const [joinCode, setJoinCode] = useState("");
+  const [joinRole, setJoinRole] = useState("부모");
+  const [joinEmoji, setJoinEmoji] = useState("👩");
   const [joinError, setJoinError] = useState("");
   const [joinLoading, setJoinLoading] = useState(false);
   const fileRef = useRef(null);
@@ -1786,7 +1847,7 @@ function MyPage({ user, onUpdate, onLogout, onCouponManage }){
     // 기존 가족에서 나가기 (본인 멤버 삭제)
     await supabase.from("family_members").delete().eq("user_id",user.id);
     // 새 가족에 합류
-    await supabase.from("family_members").insert({family_id:invite.family_id,user_id:user.id,name:user.nickname,role:"부모",emoji:"👩"});
+    await supabase.from("family_members").insert({family_id:invite.family_id,user_id:user.id,name:user.nickname,role:joinRole,emoji:joinEmoji});
     // 초대 코드 사용 처리
     await supabase.from("family_invites").update({used_by:user.id}).eq("id",invite.id);
     // 가족 정보 새로고침
@@ -1956,6 +2017,7 @@ function MyPage({ user, onUpdate, onLogout, onCouponManage }){
         <div style={{borderTop:`1px solid ${C.border}`,marginTop:16,paddingTop:16}}>
           {showJoinInput ? (
             <div>
+              <label style={{fontSize:12,fontWeight:700,color:C.textMid,marginBottom:6,display:"block"}}>초대 코드</label>
               <input value={joinCode} onChange={e=>setJoinCode(e.target.value)}
                 placeholder="초대 코드 입력 (예: FD-A3K9)"
                 style={{
@@ -1963,12 +2025,41 @@ function MyPage({ user, onUpdate, onLogout, onCouponManage }){
                   border:`2px solid ${C.border}`,fontSize:14,fontWeight:600,
                   fontFamily:"'Nunito',sans-serif",color:C.textDark,
                   outline:"none",background:C.bg,boxSizing:"border-box",
-                  marginBottom:8,textTransform:"uppercase",letterSpacing:1,
+                  marginBottom:12,textTransform:"uppercase",letterSpacing:1,
                 }}
                 onFocus={e=>e.target.style.borderColor=C.primary}
                 onBlur={e=>e.target.style.borderColor=C.border}
-                onKeyDown={e=>e.key==="Enter"&&handleJoin()}
               />
+              <label style={{fontSize:12,fontWeight:700,color:C.textMid,marginBottom:6,display:"block"}}>역할</label>
+              <div style={{display:"flex",gap:6,marginBottom:12,flexWrap:"wrap"}}>
+                {ROLE_OPTIONS.map(r=>(
+                  <button key={r} onClick={()=>{
+                    setJoinRole(r);
+                    if(r==="아이") setJoinEmoji("👦");
+                    else if(r==="조부모") setJoinEmoji("👴");
+                    else if(r==="반려동물") setJoinEmoji("🐶");
+                    else setJoinEmoji("👩");
+                  }} style={{
+                    padding:"7px 14px",borderRadius:999,border:"none",
+                    background:joinRole===r?C.primary:`${C.primary}08`,
+                    color:joinRole===r?"white":C.textMid,
+                    fontSize:13,fontWeight:700,fontFamily:"'Nunito',sans-serif",
+                    cursor:"pointer",transition:"all .15s",
+                  }}>{r}</button>
+                ))}
+              </div>
+              <label style={{fontSize:12,fontWeight:700,color:C.textMid,marginBottom:6,display:"block"}}>아이콘</label>
+              <div style={{display:"flex",gap:8,marginBottom:14,flexWrap:"wrap"}}>
+                {MEMBER_EMOJIS.map(em=>(
+                  <button key={em} onClick={()=>setJoinEmoji(em)} style={{
+                    width:40,height:40,borderRadius:10,border:"none",
+                    background:joinEmoji===em?`${C.primary}15`:C.bg,
+                    fontSize:20,cursor:"pointer",transition:"all .15s",
+                    outline:joinEmoji===em?`2.5px solid ${C.primary}`:"2px solid transparent",
+                    display:"flex",alignItems:"center",justifyContent:"center",
+                  }}>{em}</button>
+                ))}
+              </div>
               {joinError&&<div style={{fontSize:13,fontWeight:700,color:C.secondary,marginBottom:8}}>{joinError}</div>}
               <div style={{display:"flex",gap:8}}>
                 <button onClick={handleJoin} disabled={joinLoading} style={{
@@ -1977,7 +2068,7 @@ function MyPage({ user, onUpdate, onLogout, onCouponManage }){
                   fontFamily:"'Nunito',sans-serif",cursor:joinLoading?"not-allowed":"pointer",
                   opacity:joinLoading?.7:1,
                 }}>{joinLoading?"합류 중...":"가족 합류"}</button>
-                <button onClick={()=>{setShowJoinInput(false);setJoinCode("");setJoinError("");}} style={{
+                <button onClick={()=>{setShowJoinInput(false);setJoinCode("");setJoinError("");setJoinRole("부모");setJoinEmoji("👩");}} style={{
                   padding:"10px 16px",borderRadius:12,border:"none",
                   background:C.bg,color:C.textMid,fontSize:14,fontWeight:700,
                   fontFamily:"'Nunito',sans-serif",cursor:"pointer",
@@ -2063,13 +2154,26 @@ export default function FamilyDay() {
     // 1. 이 유저가 속한 가족 찾기
     const {data:memberRow}=await supabase.from("family_members").select("family_id").eq("user_id",userId).limit(1).single();
     let familyId=memberRow?.family_id;
-    // 2. 가족이 없으면 새로 생성
+    // 2. 가족이 없으면: 대기 중인 초대 코드 확인 → 없으면 새 가족 생성
     if(!familyId){
-      const {data:newFamily}=await supabase.from("families").insert({name:"우리 가족"}).select("id").single();
-      familyId=newFamily.id;
-      // 본인을 부모로 등록
-      const {data:{user:authUser}}=await supabase.auth.getUser();
-      await supabase.from("family_members").insert({family_id:familyId,user_id:userId,name:authUser.email.split("@")[0],role:"부모",emoji:"👩"});
+      const pendingRaw=localStorage.getItem("fd_pending_invite");
+      if(pendingRaw){
+        const pending=JSON.parse(pendingRaw);
+        localStorage.removeItem("fd_pending_invite");
+        const {data:invite}=await supabase.from("family_invites").select("*").eq("code",pending.code).is("used_by",null).gt("expires_at",new Date().toISOString()).single();
+        if(invite){
+          familyId=invite.family_id;
+          const {data:{user:authUser}}=await supabase.auth.getUser();
+          await supabase.from("family_members").insert({family_id:familyId,user_id:userId,name:authUser.email.split("@")[0],role:pending.role||"부모",emoji:pending.emoji||"👩"});
+          await supabase.from("family_invites").update({used_by:userId}).eq("id",invite.id);
+        }
+      }
+      if(!familyId){
+        const {data:newFamily}=await supabase.from("families").insert({name:"우리 가족"}).select("id").single();
+        familyId=newFamily.id;
+        const {data:{user:authUser}}=await supabase.auth.getUser();
+        await supabase.from("family_members").insert({family_id:familyId,user_id:userId,name:authUser.email.split("@")[0],role:"부모",emoji:"👩"});
+      }
     }
     // 3. 가족 구성원 목록 조회
     const {data:members}=await supabase.from("family_members").select("*").eq("family_id",familyId).order("created_at");
