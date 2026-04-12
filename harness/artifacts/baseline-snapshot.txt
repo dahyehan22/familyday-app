@@ -1,0 +1,57 @@
+# FamilyDay 리팩토링 베이스라인 스냅샷
+# 생성일: 2026-04-12
+
+## 파일 지표
+- 총 줄 수: 2722
+- 단일 파일: src/FamilyDay.jsx
+
+## 컴포넌트 목록 (26개)
+- 유틸 함수: isSameDay, getWeekDates, getMonthGrid, fmtDateKey, getWeekStartDate, stoneSide, generateRepeatedEvents
+- UI 컴포넌트: StarBurst, CuteFace (2)
+- 할 일: TodoItem, AddTaskModal, EditTaskModal (3)
+- 이벤트: EventSheet, EventSheetWithAdd, AddEventModal, WeeklyCalendar, MonthlyCalendar (5)
+- 타임라인: KidDayTimeline (1)
+- 쿠폰: CouponPage, CouponManagePage, EditCouponModal, AddCouponModal (4)
+- 인증: AuthPage (1)
+- 가족/마이: AddMemberModal, MyPage (2)
+- 루트: FamilyDay (1)
+
+## 상태 지표
+- useState 총 호출 수: 75
+- 루트(FamilyDay) useState: 16개
+- supabase 직접 호출: 41곳
+
+## 반복 패턴 분석
+- BottomSheet 구조 중복: 8곳
+  - AddTaskModal (L170), EditTaskModal (L199), AddEventModal (L288)
+  - EventSheet (L219), EventSheetWithAdd (L661)
+  - EditCouponModal (L1271), AddCouponModal (L1350)
+  - AuthPage 내부 (L1461)
+- ConfirmModal 구조 중복: 2곳
+  - CouponPage 사용 확인 (L1146)
+  - CouponManagePage 삭제 확인 (L1248)
+- inputStyle 객체 중복: 5곳 (각 모달마다 동일 선언)
+- labelStyle: 각 모달마다 동일 inline 반복
+
+## Supabase 호출 분포
+- AuthPage: 4곳 (signUp, signIn, resetPassword, updateUser)
+- MyPage: 6곳 (invite, join, deleteMember)
+- FamilyDay 루트: 31곳
+  - loadFamily(): 7곳
+  - loadAll(): 4곳
+  - toggleTodo: 2곳
+  - deleteTodo: 1곳
+  - addTodo: 1곳
+  - editTodo: 1곳
+  - addEvent: 1곳
+  - addCoupon/deleteCoupon/editCoupon: 3곳
+  - stars upsert: 1곳
+  - auth session: 6곳
+  - auth.signOut: 1곳
+  - addMember (MyPage에서 루트로 올라온 것): 1곳
+
+## 목표 지표 (리팩토링 후)
+- FamilyDay 루트 줄 수: 2722 → ~2200 이하
+- 루트 useState: 16 → 4~6 (커스텀 훅으로 위임)
+- supabase 직접 호출 in component: 41 → 0 (서비스 레이어로 이전)
+- 중복 코드 제거율: ~15%

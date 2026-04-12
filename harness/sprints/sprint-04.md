@@ -1,10 +1,30 @@
-import { createClient } from '@supabase/supabase-js';
+# Sprint 4: Supabase 서비스 레이어 추출
 
-const supabaseUrl = import.meta.env.VITE_SUPABASE_URL;
-const supabaseAnonKey = import.meta.env.VITE_SUPABASE_ANON_KEY;
+## 상태: 완료
 
-export const supabase = createClient(supabaseUrl, supabaseAnonKey);
+## 스프린트 계약 (Generator ↔ Evaluator 합의)
 
+### 구현 범위
+1. `src/supabaseClient.js`에 7개 서비스 그룹 추가
+2. `src/FamilyDay.jsx`에서 `supabase` 직접 import 제거
+3. 모든 `supabase.*` 호출을 서비스 함수로 교체 (41개 → 0개)
+
+### 41개 호출 분류
+
+| 그룹 | 테이블/API | 호출 수 | 위치 |
+|------|---------|--------|------|
+| `authDB` | supabase.auth.* | 10 | AuthPage, FamilyDay |
+| `familyDB` | family_members, families, family_invites | 14 | MyPage, FamilyDay |
+| `loadFamily` | (위 DB 포함, 함수 이전) | — | FamilyDay 내부 함수 |
+| `loadAllFamilyData` | todos, events, coupons, family_settings | 4 | FamilyDay useEffect |
+| `todoDB` | todos | 7 | FamilyDay |
+| `eventDB` | events | 2 | FamilyDay |
+| `couponDB` | coupons | 4 | FamilyDay |
+| `settingsDB` | family_settings | 1 | FamilyDay |
+
+### supabaseClient.js 추가 스펙
+
+```js
 // ─── AUTH ───
 export const authDB = {
   signUp: (email, password, redirectTo) =>
@@ -39,7 +59,7 @@ export const familyDB = {
   useInvite: (id, userId) => supabase.from("family_invites").update({used_by:userId}).eq("id",id),
 };
 
-// ─── LOAD FAMILY ───
+// ─── LOAD FAMILY (FamilyDay 내 함수 이전) ───
 export async function loadFamily(userId) {
   const {data:memberRow} = await familyDB.getMemberByUserId(userId);
   let familyId = memberRow?.family_id;
@@ -102,3 +122,49 @@ export const couponDB = {
 export const settingsDB = {
   upsertStars: (familyId, stars) => supabase.from("family_settings").upsert({family_id:familyId,stars,updated_at:new Date().toISOString()},{onConflict:"family_id"}).then(()=>{}),
 };
+```
+
+### FamilyDay.jsx import 변경
+```js
+// Before
+import { supabase } from "./supabaseClient";
+
+// After
+import { authDB, familyDB, loadFamily, loadAllFamilyData, todoDB, eventDB, couponDB, settingsDB } from "./supabaseClient";
+```
+
+### 성공 기준 (Evaluator 체크리스트)
+- [ ] `pnpm build` 성공
+- [ ] `src/FamilyDay.jsx` 내 `supabase\.` 패턴 0개 (grep)
+- [ ] `src/supabaseClient.js`에 7개 서비스 그룹 정의 확인
+- [ ] `loadFamily` 함수가 FamilyDay.jsx에서 제거되고 supabaseClient.js에 존재
+- [ ] `loadAllFamilyData` supabaseClient.js에 정의
+- [ ] todoDB, eventDB, couponDB, settingsDB 각 사용처 확인
+
+## 구현 노트 (Generator 작성)
+- 상태: **완료**
+- Sprint 3 후 줄 수: 2662 → Sprint 4 후: 2611 (-51줄)
+  - FamilyDay 내 loadFamily 함수 이전(-33줄) + 41개 직접 호출 → 서비스 함수 교체(-18줄 순감소)
+- pnpm build: **성공** (dist/assets/index-CJ4b8_Nq.js, 432.52 kB)
+
+### supabaseClient.js 추가 내용
+| 그룹 | 함수/상수 | 설명 |
+|------|---------|------|
+| `authDB` | 9개 메서드 | auth.* 래퍼 |
+| `familyDB` | 10개 메서드 | family_members, families, family_invites |
+| `loadFamily` | 함수 | FamilyDay에서 이전, localStorage 로직 포함 |
+| `loadAllFamilyData` | 함수 | Promise.all 4개 테이블 |
+| `todoDB` | 5개 메서드 | todos CRUD |
+| `eventDB` | 1개 메서드 | events add |
+| `couponDB` | 3개 메서드 | coupons CRUD |
+| `settingsDB` | 1개 메서드 | family_settings upsert |
+
+### FamilyDay.jsx 변경 사항
+- import: `supabase` → 7개 서비스 모듈
+- 로컬 `loadFamily` 함수 제거 (-33줄)
+- 41개 `supabase.*` 직접 호출 → 서비스 함수 교체
+- `supabase.` 직접 호출: **0개**
+
+## 평가 결과
+- 상태: **PASS (99점)**
+- 상세: `harness/evals/eval-04.md` 참조

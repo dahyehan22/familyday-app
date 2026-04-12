@@ -1,5 +1,5 @@
 import React, { useState, useEffect, useCallback, useRef, useMemo } from "react";
-import { supabase } from "./supabaseClient";
+import { authDB, familyDB, loadFamily, loadAllFamilyData, todoDB, eventDB, couponDB, settingsDB } from "./supabaseClient";
 
 /* ─── colour tokens ─── */
 const C = {
@@ -145,6 +145,144 @@ function CuteFace({size=36,style:sx={}}){
   </div>);
 }
 
+/* ════════════ BOTTOM SHEET ════════════ */
+function BottomSheet({ onClose, children, scrollable = false, contentStyle = {} }) {
+  return (
+    <div onClick={onClose} style={{
+      position: "fixed", inset: 0, background: "rgba(45,43,85,.45)",
+      backdropFilter: "blur(6px)", zIndex: 1000, display: "flex",
+      alignItems: "flex-end", justifyContent: "center", animation: "fadeIn .2s ease",
+    }}>
+      <div onClick={e => e.stopPropagation()} style={{
+        width: "100%", maxWidth: 420, background: "white",
+        borderRadius: "28px 28px 0 0", padding: "28px 24px 32px",
+        animation: "slideUp .35s cubic-bezier(.22,.68,.36,1.05)",
+        ...(scrollable ? { maxHeight: "60vh", overflowY: "auto" } : {}),
+        ...contentStyle,
+      }}>
+        <div style={{ width: 40, height: 4, borderRadius: 2, background: C.border, margin: "0 auto 18px" }} />
+        {children}
+      </div>
+    </div>
+  );
+}
+
+/* ════════════ CONFIRM MODAL ════════════ */
+function ConfirmModal({ emoji, title, subtitle, message, onCancel, onConfirm, confirmLabel = "확인", confirmColor = C.primary }) {
+  return (
+    <div onClick={onCancel} style={{
+      position: "fixed", inset: 0, background: "rgba(45,43,85,.45)",
+      backdropFilter: "blur(6px)", zIndex: 1000,
+      display: "flex", alignItems: "center", justifyContent: "center",
+      animation: "fadeIn .2s ease",
+    }}>
+      <div onClick={e => e.stopPropagation()} style={{
+        width: "85%", maxWidth: 320, background: "white",
+        borderRadius: 24, padding: "32px 24px 24px",
+        textAlign: "center", animation: "pop .35s cubic-bezier(.22,.68,.36,1.05)",
+      }}>
+        <div style={{ fontSize: 48, marginBottom: 12 }}>{emoji}</div>
+        <h3 style={{ margin: "0 0 8px", fontSize: 18, fontWeight: 900, color: C.textDark, fontFamily: "'Nunito',sans-serif" }}>{title}</h3>
+        {subtitle && <p style={{ margin: "0 0 6px", fontSize: 14, fontWeight: 700, color: C.textDark }}>{subtitle}</p>}
+        <p style={{ margin: "0 0 24px", fontSize: 13, fontWeight: 600, color: C.textMid }}>{message}</p>
+        <div style={{ display: "flex", gap: 10 }}>
+          <button onClick={onCancel} style={{ flex: 1, padding: "12px", borderRadius: 14, border: `2px solid ${C.border}`, background: "white", color: C.textMid, fontSize: 15, fontWeight: 800, fontFamily: "'Nunito',sans-serif", cursor: "pointer" }}>취소</button>
+          <button onClick={onConfirm} style={{ flex: 1, padding: "12px", borderRadius: 14, border: "none", background: `linear-gradient(135deg,${confirmColor},${confirmColor}DD)`, color: "white", fontSize: 15, fontWeight: 800, fontFamily: "'Nunito',sans-serif", cursor: "pointer", boxShadow: `0 4px 16px ${confirmColor}55` }}>
+            {confirmLabel}
+          </button>
+        </div>
+      </div>
+    </div>
+  );
+}
+
+/* ════════════ USE TODO MANAGER HOOK ════════════ */
+function useTodoManager(familyId,setStars){
+  const [todos,setTodos]=useState([]);
+  const toggleTodo=useCallback(id=>{
+    const dk=fmtDateKey(new Date());
+    setTodos(prev=>prev.map(t=>{
+      if(t.id===id&&!t.isDone){
+        setStars(s=>s+t.starReward);
+        const updated={...t,isDone:true,doneDate:dk};
+        todoDB.done(id,dk);
+        return updated;
+      }
+      if(t.id===id&&t.isDone&&t.owner==="mom"){
+        todoDB.undone(id);
+        return{...t,isDone:false,doneDate:undefined};
+      }
+      return t;
+    }));
+  },[setStars]);
+  const deleteTodo=useCallback(id=>{
+    setTodos(p=>p.filter(t=>t.id!==id));
+    todoDB.delete(id);
+  },[]);
+  const addTodo=useCallback(item=>{
+    setTodos(p=>[...p,item]);
+    todoDB.add(item,familyId);
+  },[familyId]);
+  const editTodo=useCallback(updated=>{
+    setTodos(p=>p.map(t=>t.id===updated.id?updated:t));
+    todoDB.edit(updated);
+  },[]);
+  const today=new Date();
+  const todayKey=fmtDateKey(today);
+  const curWeekStart=fmtDateKey(getWeekStartDate(today));
+  const visibleTodos=todos.filter(t=>{
+    const todoWeekStart=fmtDateKey(getWeekStartDate(new Date(t.createdDate+"T00:00:00")));
+    if(todoWeekStart!==curWeekStart) return false;
+    if(!t.isDone) return true;
+    return t.doneDate===todayKey;
+  });
+  const momTodos=visibleTodos.filter(t=>t.owner==="mom");
+  const kidTodos=visibleTodos.filter(t=>t.owner==="kid");
+  const streak=useMemo(()=>{
+    const kidDone=todos.filter(t=>t.owner==="kid"&&t.isDone&&t.doneDate);
+    const doneDates=[...new Set(kidDone.map(t=>t.doneDate))].sort().reverse();
+    if(doneDates.length===0) return 0;
+    let count=0;
+    const d=new Date();
+    for(let i=0;i<60;i++){
+      const key=fmtDateKey(d);
+      if(doneDates.includes(key)){count++;d.setDate(d.getDate()-1);}
+      else if(i===0){d.setDate(d.getDate()-1);continue;}
+      else break;
+    }
+    return count;
+  },[todos]);
+  return{todos,setTodos,visibleTodos,momTodos,kidTodos,streak,toggleTodo,deleteTodo,addTodo,editTodo};
+}
+
+/* ════════════ USE EVENT MANAGER HOOK ════════════ */
+function useEventManager(familyId){
+  const [events,setEvents]=useState([]);
+  const addEvent=useCallback(ev=>{
+    setEvents(p=>[...p,ev]);
+    eventDB.add(ev,familyId);
+  },[familyId]);
+  return{events,setEvents,addEvent};
+}
+
+/* ════════════ USE COUPON MANAGER HOOK ════════════ */
+function useCouponManager(familyId){
+  const [coupons,setCoupons]=useState([]);
+  const addCoupon=useCallback(c=>{
+    setCoupons(p=>[...p,c].sort((a,b)=>a.starCost-b.starCost));
+    couponDB.add(c,familyId);
+  },[familyId]);
+  const deleteCoupon=useCallback(id=>{
+    setCoupons(p=>p.filter(c=>c.id!==id));
+    couponDB.delete(id);
+  },[]);
+  const editCoupon=useCallback(updated=>{
+    setCoupons(p=>p.map(c=>c.id===updated.id?updated:c).sort((a,b)=>a.starCost-b.starCost));
+    couponDB.edit(updated);
+  },[]);
+  return{coupons,setCoupons,addCoupon,deleteCoupon,editCoupon};
+}
+
 /* ════════════ TODO ITEM ════════════ */
 function TodoItem({item,onToggle,onDelete,onEdit}){
   const [justDone,setJustDone]=useState(false);const btnRef=useRef(null);const [burst,setBurst]=useState(null);
@@ -172,26 +310,23 @@ function AddTaskModal({onClose,onAdd,kidName="아이"}){
   useEffect(()=>{setTimeout(()=>inputRef.current?.focus(),100)},[]);
   const handleAdd=()=>{if(!text.trim())return;onAdd({id:uid(),text:text.trim(),owner,isDone:false,starReward:1,createdDate:fmtDateKey(new Date()),isWeekly});onClose();};
   return(
-    <div onClick={onClose} style={{position:"fixed",inset:0,background:"rgba(45,43,85,.45)",backdropFilter:"blur(6px)",zIndex:1000,display:"flex",alignItems:"flex-end",justifyContent:"center",animation:"fadeIn .2s ease"}}>
-      <div onClick={e=>e.stopPropagation()} style={{width:"100%",maxWidth:420,background:"white",borderRadius:"28px 28px 0 0",padding:"28px 24px 32px",animation:"slideUp .35s cubic-bezier(.22,.68,.36,1.05)"}}>
-        <div style={{width:40,height:4,borderRadius:2,background:C.border,margin:"0 auto 20px"}}/>
-        <h3 style={{margin:"0 0 20px",fontSize:20,fontWeight:800,color:C.textDark,fontFamily:"'Nunito',sans-serif"}}>✨ 할 일 추가</h3>
-        <div style={{display:"flex",gap:10,marginBottom:18}}>
-          {["mom","kid"].map(o=><button key={o} onClick={()=>setOwner(o)} style={{padding:"8px 20px",borderRadius:999,border:`2px solid ${owner===o?(o==="mom"?C.momTag:C.kidTag):C.border}`,background:owner===o?(o==="mom"?"rgba(255,101,132,.1)":"rgba(108,99,255,.1)"):"transparent",color:owner===o?(o==="mom"?C.momTag:C.kidTag):C.textMid,fontSize:14,fontWeight:700,fontFamily:"'Nunito',sans-serif",cursor:"pointer",transition:"all .2s"}}>{o==="mom"?"👩 엄마":`🧒 ${kidName}`}</button>)}
-        </div>
-        <input ref={inputRef} value={text} onChange={e=>setText(e.target.value)} onKeyDown={e=>e.key==="Enter"&&handleAdd()} placeholder="무엇을 해야 하나요?" style={{width:"100%",padding:"14px 18px",borderRadius:16,border:`2px solid ${C.border}`,fontSize:15,fontWeight:600,fontFamily:"'Nunito',sans-serif",color:C.textDark,outline:"none",background:C.bg}} onFocus={e=>e.target.style.borderColor=C.primary} onBlur={e=>e.target.style.borderColor=C.border}/>
-        <div onClick={()=>setIsWeekly(w=>!w)} style={{display:"flex",alignItems:"center",gap:10,marginTop:14,padding:"12px 16px",borderRadius:14,border:`2px solid ${isWeekly?C.primary:C.border}`,background:isWeekly?`${C.primary}08`:"transparent",cursor:"pointer",transition:"all .2s"}}>
-          <div style={{width:20,height:20,borderRadius:6,border:`2px solid ${isWeekly?C.primary:C.border}`,background:isWeekly?C.primary:"white",display:"flex",alignItems:"center",justifyContent:"center",transition:"all .2s",flexShrink:0}}>
-            {isWeekly&&<svg width="12" height="12" viewBox="0 0 12 12" fill="none"><path d="M2 6L5 9L10 3" stroke="white" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"/></svg>}
-          </div>
-          <div>
-            <div style={{fontSize:14,fontWeight:700,color:isWeekly?C.primary:C.textMid,fontFamily:"'Nunito',sans-serif"}}>🔄 매주 반복</div>
-            <div style={{fontSize:11,fontWeight:600,color:C.textLight,marginTop:1}}>매주 자동으로 다시 추가돼요</div>
-          </div>
-        </div>
-        <button onClick={handleAdd} disabled={!text.trim()} style={{width:"100%",padding:"14px",marginTop:16,borderRadius:16,border:"none",background:text.trim()?`linear-gradient(135deg,${C.primary},${C.primaryLight})`:C.border,color:text.trim()?"white":C.textLight,fontSize:16,fontWeight:800,fontFamily:"'Nunito',sans-serif",cursor:text.trim()?"pointer":"default",boxShadow:text.trim()?"0 4px 16px rgba(108,99,255,.35)":"none"}}>할 일 추가 ✨</button>
+    <BottomSheet onClose={onClose}>
+      <h3 style={{margin:"0 0 20px",fontSize:20,fontWeight:800,color:C.textDark,fontFamily:"'Nunito',sans-serif"}}>✨ 할 일 추가</h3>
+      <div style={{display:"flex",gap:10,marginBottom:18}}>
+        {["mom","kid"].map(o=><button key={o} onClick={()=>setOwner(o)} style={{padding:"8px 20px",borderRadius:999,border:`2px solid ${owner===o?(o==="mom"?C.momTag:C.kidTag):C.border}`,background:owner===o?(o==="mom"?"rgba(255,101,132,.1)":"rgba(108,99,255,.1)"):"transparent",color:owner===o?(o==="mom"?C.momTag:C.kidTag):C.textMid,fontSize:14,fontWeight:700,fontFamily:"'Nunito',sans-serif",cursor:"pointer",transition:"all .2s"}}>{o==="mom"?"👩 엄마":`🧒 ${kidName}`}</button>)}
       </div>
-    </div>
+      <input ref={inputRef} value={text} onChange={e=>setText(e.target.value)} onKeyDown={e=>e.key==="Enter"&&handleAdd()} placeholder="무엇을 해야 하나요?" style={{width:"100%",padding:"14px 18px",borderRadius:16,border:`2px solid ${C.border}`,fontSize:15,fontWeight:600,fontFamily:"'Nunito',sans-serif",color:C.textDark,outline:"none",background:C.bg}} onFocus={e=>e.target.style.borderColor=C.primary} onBlur={e=>e.target.style.borderColor=C.border}/>
+      <div onClick={()=>setIsWeekly(w=>!w)} style={{display:"flex",alignItems:"center",gap:10,marginTop:14,padding:"12px 16px",borderRadius:14,border:`2px solid ${isWeekly?C.primary:C.border}`,background:isWeekly?`${C.primary}08`:"transparent",cursor:"pointer",transition:"all .2s"}}>
+        <div style={{width:20,height:20,borderRadius:6,border:`2px solid ${isWeekly?C.primary:C.border}`,background:isWeekly?C.primary:"white",display:"flex",alignItems:"center",justifyContent:"center",transition:"all .2s",flexShrink:0}}>
+          {isWeekly&&<svg width="12" height="12" viewBox="0 0 12 12" fill="none"><path d="M2 6L5 9L10 3" stroke="white" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"/></svg>}
+        </div>
+        <div>
+          <div style={{fontSize:14,fontWeight:700,color:isWeekly?C.primary:C.textMid,fontFamily:"'Nunito',sans-serif"}}>🔄 매주 반복</div>
+          <div style={{fontSize:11,fontWeight:600,color:C.textLight,marginTop:1}}>매주 자동으로 다시 추가돼요</div>
+        </div>
+      </div>
+      <button onClick={handleAdd} disabled={!text.trim()} style={{...modalSubmitBtn(text.trim()),marginTop:16}}>할 일 추가 ✨</button>
+    </BottomSheet>
   );
 }
 
@@ -201,17 +336,14 @@ function EditTaskModal({item,onClose,onSave,kidName="아이"}){
   useEffect(()=>{setTimeout(()=>inputRef.current?.focus(),100)},[]);
   const handleSave=()=>{if(!text.trim())return;onSave({...item,text:text.trim(),owner});onClose();};
   return(
-    <div onClick={onClose} style={{position:"fixed",inset:0,background:"rgba(45,43,85,.45)",backdropFilter:"blur(6px)",zIndex:1000,display:"flex",alignItems:"flex-end",justifyContent:"center",animation:"fadeIn .2s ease"}}>
-      <div onClick={e=>e.stopPropagation()} style={{width:"100%",maxWidth:420,background:"white",borderRadius:"28px 28px 0 0",padding:"28px 24px 32px",animation:"slideUp .35s cubic-bezier(.22,.68,.36,1.05)"}}>
-        <div style={{width:40,height:4,borderRadius:2,background:C.border,margin:"0 auto 20px"}}/>
-        <h3 style={{margin:"0 0 20px",fontSize:20,fontWeight:800,color:C.textDark,fontFamily:"'Nunito',sans-serif"}}>✏️ 할 일 수정</h3>
-        <div style={{display:"flex",gap:10,marginBottom:18}}>
-          {["mom","kid"].map(o=><button key={o} onClick={()=>setOwner(o)} style={{padding:"8px 20px",borderRadius:999,border:`2px solid ${owner===o?(o==="mom"?C.momTag:C.kidTag):C.border}`,background:owner===o?(o==="mom"?"rgba(255,101,132,.1)":"rgba(108,99,255,.1)"):"transparent",color:owner===o?(o==="mom"?C.momTag:C.kidTag):C.textMid,fontSize:14,fontWeight:700,fontFamily:"'Nunito',sans-serif",cursor:"pointer",transition:"all .2s"}}>{o==="mom"?"👩 엄마":`🧒 ${kidName}`}</button>)}
-        </div>
-        <input ref={inputRef} value={text} onChange={e=>setText(e.target.value)} onKeyDown={e=>e.key==="Enter"&&handleSave()} placeholder="무엇을 해야 하나요?" style={{width:"100%",padding:"14px 18px",borderRadius:16,border:`2px solid ${C.border}`,fontSize:15,fontWeight:600,fontFamily:"'Nunito',sans-serif",color:C.textDark,outline:"none",background:C.bg}} onFocus={e=>e.target.style.borderColor=C.primary} onBlur={e=>e.target.style.borderColor=C.border}/>
-        <button onClick={handleSave} disabled={!text.trim()} style={{width:"100%",padding:"14px",marginTop:16,borderRadius:16,border:"none",background:text.trim()?`linear-gradient(135deg,${C.primary},${C.primaryLight})`:C.border,color:text.trim()?"white":C.textLight,fontSize:16,fontWeight:800,fontFamily:"'Nunito',sans-serif",cursor:text.trim()?"pointer":"default",boxShadow:text.trim()?"0 4px 16px rgba(108,99,255,.35)":"none"}}>수정 완료 ✏️</button>
+    <BottomSheet onClose={onClose}>
+      <h3 style={{margin:"0 0 20px",fontSize:20,fontWeight:800,color:C.textDark,fontFamily:"'Nunito',sans-serif"}}>✏️ 할 일 수정</h3>
+      <div style={{display:"flex",gap:10,marginBottom:18}}>
+        {["mom","kid"].map(o=><button key={o} onClick={()=>setOwner(o)} style={{padding:"8px 20px",borderRadius:999,border:`2px solid ${owner===o?(o==="mom"?C.momTag:C.kidTag):C.border}`,background:owner===o?(o==="mom"?"rgba(255,101,132,.1)":"rgba(108,99,255,.1)"):"transparent",color:owner===o?(o==="mom"?C.momTag:C.kidTag):C.textMid,fontSize:14,fontWeight:700,fontFamily:"'Nunito',sans-serif",cursor:"pointer",transition:"all .2s"}}>{o==="mom"?"👩 엄마":`🧒 ${kidName}`}</button>)}
       </div>
-    </div>
+      <input ref={inputRef} value={text} onChange={e=>setText(e.target.value)} onKeyDown={e=>e.key==="Enter"&&handleSave()} placeholder="무엇을 해야 하나요?" style={{width:"100%",padding:"14px 18px",borderRadius:16,border:`2px solid ${C.border}`,fontSize:15,fontWeight:600,fontFamily:"'Nunito',sans-serif",color:C.textDark,outline:"none",background:C.bg}} onFocus={e=>e.target.style.borderColor=C.primary} onBlur={e=>e.target.style.borderColor=C.border}/>
+      <button onClick={handleSave} disabled={!text.trim()} style={{...modalSubmitBtn(text.trim()),marginTop:16}}>수정 완료 ✏️</button>
+    </BottomSheet>
   );
 }
 
@@ -219,24 +351,24 @@ function EditTaskModal({item,onClose,onSave,kidName="아이"}){
 function EventSheet({events,date,onClose}){
   const label=date?`${date.getMonth()+1}월 ${date.getDate()}일 (${DAYS_KR[date.getDay()]})`:"";
   return(
-    <div onClick={onClose} style={{position:"fixed",inset:0,background:"rgba(45,43,85,.45)",backdropFilter:"blur(6px)",zIndex:1000,display:"flex",alignItems:"flex-end",justifyContent:"center",animation:"fadeIn .15s ease"}}>
-      <div onClick={e=>e.stopPropagation()} style={{width:"100%",maxWidth:420,background:"white",borderRadius:"28px 28px 0 0",padding:"24px 20px 32px",animation:"slideUp .3s cubic-bezier(.22,.68,.36,1.05)",maxHeight:"60vh",overflowY:"auto"}}>
-        <div style={{width:40,height:4,borderRadius:2,background:C.border,margin:"0 auto 16px"}}/>
-        <h3 style={{margin:"0 0 16px",fontSize:18,fontWeight:800,color:C.textDark,fontFamily:"'Nunito',sans-serif"}}>📅 {label}</h3>
-        {events.length===0&&<p style={{textAlign:"center",color:C.textLight,fontWeight:600,fontSize:15,padding:"20px 0"}}>일정이 없어요 😊</p>}
-        {events.map((ev,i)=><div key={ev.id} style={{display:"flex",alignItems:"center",gap:12,padding:"14px 16px",marginBottom:8,background:`${ev.color}10`,borderRadius:16,border:`1.5px solid ${ev.color}25`,animation:`slideUp .3s ${i*.06}s ease both`}}>
-          <div style={{width:6,height:40,borderRadius:3,background:ev.color,flexShrink:0}}/>
-          <div style={{flex:1}}>
-            <div style={{fontSize:15,fontWeight:700,color:C.textDark,fontFamily:"'Nunito',sans-serif"}}>{ev.emoji} {ev.title}</div>
-            <div style={{fontSize:12,fontWeight:600,color:C.textMid,marginTop:2}}>{String(ev.startHour).padStart(2,"0")}:{String(ev.startMin).padStart(2,"0")} – {String(ev.endHour).padStart(2,"0")}:{String(ev.endMin).padStart(2,"0")}</div>
-          </div>
-        </div>)}
-      </div>
-    </div>
+    <BottomSheet onClose={onClose} scrollable contentStyle={{padding:"24px 20px 32px"}}>
+      <h3 style={{margin:"0 0 16px",fontSize:18,fontWeight:800,color:C.textDark,fontFamily:"'Nunito',sans-serif"}}>📅 {label}</h3>
+      {events.length===0&&<p style={{textAlign:"center",color:C.textLight,fontWeight:600,fontSize:15,padding:"20px 0"}}>일정이 없어요 😊</p>}
+      {events.map((ev,i)=><div key={ev.id} style={{display:"flex",alignItems:"center",gap:12,padding:"14px 16px",marginBottom:8,background:`${ev.color}10`,borderRadius:16,border:`1.5px solid ${ev.color}25`,animation:`slideUp .3s ${i*.06}s ease both`}}>
+        <div style={{width:6,height:40,borderRadius:3,background:ev.color,flexShrink:0}}/>
+        <div style={{flex:1}}>
+          <div style={{fontSize:15,fontWeight:700,color:C.textDark,fontFamily:"'Nunito',sans-serif"}}>{ev.emoji} {ev.title}</div>
+          <div style={{fontSize:12,fontWeight:600,color:C.textMid,marginTop:2}}>{String(ev.startHour).padStart(2,"0")}:{String(ev.startMin).padStart(2,"0")} – {String(ev.endHour).padStart(2,"0")}:{String(ev.endMin).padStart(2,"0")}</div>
+        </div>
+      </div>)}
+    </BottomSheet>
   );
 }
 
 const arrowBtn={width:34,height:34,borderRadius:"50%",border:`2px solid ${C.border}`,background:"white",color:C.textMid,fontSize:15,fontWeight:800,cursor:"pointer",display:"flex",alignItems:"center",justifyContent:"center",fontFamily:"'Nunito',sans-serif",transition:"all .15s",padding:0};
+const labelStyle={fontSize:12,fontWeight:700,color:C.textMid,marginBottom:6,display:"block"};
+const inputStyle={width:"100%",padding:"12px 14px",borderRadius:14,border:`2px solid ${C.border}`,fontSize:14,fontWeight:600,fontFamily:"'Nunito',sans-serif",color:C.textDark,outline:"none",background:C.bg,transition:"border .2s",boxSizing:"border-box"};
+const modalSubmitBtn=active=>({width:"100%",padding:"14px",borderRadius:16,border:"none",background:active?`linear-gradient(135deg,${C.primary},${C.primaryLight})`:C.border,color:active?"white":C.textLight,fontSize:16,fontWeight:800,fontFamily:"'Nunito',sans-serif",cursor:active?"pointer":"default",boxShadow:active?"0 4px 16px rgba(108,99,255,.35)":"none",transition:"all .2s"});
 
 const EMOJI_OPTIONS = ["🏫","🎹","🏊","📚","🥋","🎨","🎂","🍽️","🚗","⚽","🎬","🏥","✈️","🛒","💼","🎉"];
 const COLOR_OPTIONS = ["#FF6584","#6C63FF","#43D4A0","#FFB347","#87CEEB","#DDA0DD","#F0E68C","#FF8A65"];
@@ -325,32 +457,14 @@ function AddEventModal({ onClose, onAdd, initialDate }) {
     onClose();
   };
 
-  const inputStyle = {
-    width: "100%", padding: "12px 14px", borderRadius: 14,
-    border: `2px solid ${C.border}`, fontSize: 14, fontWeight: 600,
-    fontFamily: "'Nunito',sans-serif", color: C.textDark,
-    outline: "none", background: C.bg, transition: "border .2s",
-  };
-
   return (
-    <div onClick={onClose} style={{
-      position: "fixed", inset: 0, background: "rgba(45,43,85,.45)",
-      backdropFilter: "blur(6px)", zIndex: 1000, display: "flex",
-      alignItems: "flex-end", justifyContent: "center", animation: "fadeIn .2s ease",
-    }}>
-      <div onClick={e => e.stopPropagation()} style={{
-        width: "100%", maxWidth: 420, background: "white",
-        borderRadius: "28px 28px 0 0", padding: "24px 22px 32px",
-        animation: "slideUp .35s cubic-bezier(.22,.68,.36,1.05)",
-        maxHeight: "60vh", overflowY: "auto",
-      }}>
-        <div style={{ width: 40, height: 4, borderRadius: 2, background: C.border, margin: "0 auto 18px" }} />
-        <h3 style={{ margin: "0 0 20px", fontSize: 20, fontWeight: 800, color: C.textDark, fontFamily: "'Nunito',sans-serif" }}>
-          📅 새 일정 추가
-        </h3>
+    <BottomSheet onClose={onClose} scrollable contentStyle={{padding:"24px 22px 32px"}}>
+      <h3 style={{ margin: "0 0 20px", fontSize: 20, fontWeight: 800, color: C.textDark, fontFamily: "'Nunito',sans-serif" }}>
+        📅 새 일정 추가
+      </h3>
 
         {/* Title */}
-        <label style={{ fontSize: 12, fontWeight: 700, color: C.textMid, marginBottom: 6, display: "block" }}>일정 이름</label>
+        <label style={labelStyle}>일정 이름</label>
         <input ref={inputRef} value={title} onChange={e => setTitle(e.target.value)}
           placeholder="예: 피아노 레슨"
           style={{ ...inputStyle, marginBottom: 16 }}
@@ -359,7 +473,7 @@ function AddEventModal({ onClose, onAdd, initialDate }) {
         />
 
         {/* Date */}
-        <label style={{ fontSize: 12, fontWeight: 700, color: C.textMid, marginBottom: 6, display: "block" }}>날짜</label>
+        <label style={labelStyle}>날짜</label>
         <input type="date" value={date} onChange={e => setDate(e.target.value)}
           style={{ ...inputStyle, marginBottom: 16 }}
           onFocus={e => e.target.style.borderColor = C.primary}
@@ -369,7 +483,7 @@ function AddEventModal({ onClose, onAdd, initialDate }) {
         {/* Time row */}
         <div style={{ display: "flex", gap: 12, marginBottom: 16 }}>
           <div style={{ flex: 1 }}>
-            <label style={{ fontSize: 12, fontWeight: 700, color: C.textMid, marginBottom: 6, display: "block" }}>시작</label>
+            <label style={labelStyle}>시작</label>
             <input type="time" value={startTime} onChange={e => setStartTime(e.target.value)}
               style={inputStyle}
               onFocus={e => e.target.style.borderColor = C.primary}
@@ -377,7 +491,7 @@ function AddEventModal({ onClose, onAdd, initialDate }) {
             />
           </div>
           <div style={{ flex: 1 }}>
-            <label style={{ fontSize: 12, fontWeight: 700, color: C.textMid, marginBottom: 6, display: "block" }}>종료</label>
+            <label style={labelStyle}>종료</label>
             <input type="time" value={endTime} onChange={e => setEndTime(e.target.value)}
               style={inputStyle}
               onFocus={e => e.target.style.borderColor = C.primary}
@@ -387,7 +501,7 @@ function AddEventModal({ onClose, onAdd, initialDate }) {
         </div>
 
         {/* Emoji picker */}
-        <label style={{ fontSize: 12, fontWeight: 700, color: C.textMid, marginBottom: 8, display: "block" }}>아이콘</label>
+        <label style={{...labelStyle, marginBottom:8}}>아이콘</label>
         <div style={{ display: "flex", flexWrap: "wrap", gap: 8, marginBottom: 16 }}>
           {EMOJI_OPTIONS.map(em => (
             <button key={em} onClick={() => setEmoji(em)} style={{
@@ -401,7 +515,7 @@ function AddEventModal({ onClose, onAdd, initialDate }) {
         </div>
 
         {/* Color picker */}
-        <label style={{ fontSize: 12, fontWeight: 700, color: C.textMid, marginBottom: 8, display: "block" }}>색상</label>
+        <label style={{...labelStyle, marginBottom:8}}>색상</label>
         <div style={{ display: "flex", gap: 10, marginBottom: 22 }}>
           {COLOR_OPTIONS.map(c => (
             <button key={c} onClick={() => setColor(c)} style={{
@@ -415,7 +529,7 @@ function AddEventModal({ onClose, onAdd, initialDate }) {
         </div>
 
         {/* Repeat */}
-        <label style={{ fontSize: 12, fontWeight: 700, color: C.textMid, marginBottom: 8, display: "block" }}>반복</label>
+        <label style={{...labelStyle, marginBottom:8}}>반복</label>
         <div style={repeatPickerStyle}>
           {REPEAT_OPTIONS.map(r=>(
             <button key={r.key} onClick={()=>{setRepeat(r.key);if(r.key!=="weekly")setWeeklyDays([]);}} style={{
@@ -431,7 +545,7 @@ function AddEventModal({ onClose, onAdd, initialDate }) {
         {/* Weekly: day picker */}
         {repeat==="weekly"&&(
           <div style={{marginBottom:16}}>
-            <label style={{fontSize:12,fontWeight:700,color:C.textMid,marginBottom:8,display:"block"}}>반복 요일</label>
+            <label style={{...labelStyle, marginBottom:8}}>반복 요일</label>
             <div style={{display:"flex",gap:6,marginBottom:12}}>
               {WEEKDAY_LABELS.map((label,idx)=>{
                 const selected=weeklyDays.some(d=>d.day===idx);
@@ -497,19 +611,8 @@ function AddEventModal({ onClose, onAdd, initialDate }) {
         )}
 
         {/* Submit */}
-        <button onClick={handleAdd}
-          disabled={!title.trim() || !date}
-          style={{
-            width: "100%", padding: "14px", borderRadius: 16, border: "none",
-            background: title.trim() && date ? `linear-gradient(135deg,${C.primary},${C.primaryLight})` : C.border,
-            color: title.trim() && date ? "white" : C.textLight,
-            fontSize: 16, fontWeight: 800, fontFamily: "'Nunito',sans-serif",
-            cursor: title.trim() && date ? "pointer" : "default",
-            boxShadow: title.trim() && date ? "0 4px 16px rgba(108,99,255,.35)" : "none",
-            transition: "all .2s",
-          }}>일정 추가 📅</button>
-      </div>
-    </div>
+        <button onClick={handleAdd} disabled={!title.trim() || !date} style={modalSubmitBtn(title.trim()&&date)}>일정 추가 📅</button>
+    </BottomSheet>
   );
 }
 
@@ -661,58 +764,46 @@ function MonthlyCalendar({ events, onAddEvent }){
 function EventSheetWithAdd({ events, date, onClose, onAdd }) {
   const label = date ? `${date.getMonth()+1}월 ${date.getDate()}일 (${DAYS_KR[date.getDay()]})` : "";
   return (
-    <div onClick={onClose} style={{
-      position: "fixed", inset: 0, background: "rgba(45,43,85,.45)",
-      backdropFilter: "blur(6px)", zIndex: 1000, display: "flex",
-      alignItems: "flex-end", justifyContent: "center", animation: "fadeIn .15s ease",
-    }}>
-      <div onClick={e => e.stopPropagation()} style={{
-        width: "100%", maxWidth: 420, background: "white",
-        borderRadius: "28px 28px 0 0", padding: "24px 20px 32px",
-        animation: "slideUp .3s cubic-bezier(.22,.68,.36,1.05)",
-        maxHeight: "60vh", overflowY: "auto",
-      }}>
-        <div style={{ width: 40, height: 4, borderRadius: 2, background: C.border, margin: "0 auto 16px" }} />
-        <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", marginBottom: 16 }}>
-          <h3 style={{ margin: 0, fontSize: 18, fontWeight: 800, color: C.textDark, fontFamily: "'Nunito',sans-serif" }}>
-            📅 {label}
-          </h3>
+    <BottomSheet onClose={onClose} scrollable contentStyle={{padding:"24px 20px 32px"}}>
+      <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", marginBottom: 16 }}>
+        <h3 style={{ margin: 0, fontSize: 18, fontWeight: 800, color: C.textDark, fontFamily: "'Nunito',sans-serif" }}>
+          📅 {label}
+        </h3>
+        <button onClick={e => { e.stopPropagation(); onAdd(); }} style={{
+          padding: "6px 14px", borderRadius: 999, border: "none",
+          background: `linear-gradient(135deg,${C.primary},${C.primaryLight})`,
+          color: "white", fontSize: 12, fontWeight: 800, fontFamily: "'Nunito',sans-serif",
+          cursor: "pointer", boxShadow: "0 2px 10px rgba(108,99,255,.25)",
+          display: "flex", alignItems: "center", gap: 4,
+        }}>+ 일정 추가</button>
+      </div>
+      {events.length === 0 && (
+        <div style={{ textAlign: "center", padding: "20px 0" }}>
+          <p style={{ color: C.textLight, fontWeight: 600, fontSize: 15, marginBottom: 12 }}>일정이 없어요</p>
           <button onClick={e => { e.stopPropagation(); onAdd(); }} style={{
-            padding: "6px 14px", borderRadius: 999, border: "none",
-            background: `linear-gradient(135deg,${C.primary},${C.primaryLight})`,
-            color: "white", fontSize: 12, fontWeight: 800, fontFamily: "'Nunito',sans-serif",
-            cursor: "pointer", boxShadow: "0 2px 10px rgba(108,99,255,.25)",
-            display: "flex", alignItems: "center", gap: 4,
-          }}>+ 일정 추가</button>
+            padding: "10px 24px", borderRadius: 999, border: `2px solid ${C.primary}30`,
+            background: `${C.primary}08`, color: C.primary,
+            fontSize: 14, fontWeight: 800, fontFamily: "'Nunito',sans-serif",
+            cursor: "pointer",
+          }}>📅 새 일정 만들기</button>
         </div>
-        {events.length === 0 && (
-          <div style={{ textAlign: "center", padding: "20px 0" }}>
-            <p style={{ color: C.textLight, fontWeight: 600, fontSize: 15, marginBottom: 12 }}>일정이 없어요</p>
-            <button onClick={e => { e.stopPropagation(); onAdd(); }} style={{
-              padding: "10px 24px", borderRadius: 999, border: `2px solid ${C.primary}30`,
-              background: `${C.primary}08`, color: C.primary,
-              fontSize: 14, fontWeight: 800, fontFamily: "'Nunito',sans-serif",
-              cursor: "pointer",
-            }}>📅 새 일정 만들기</button>
-          </div>
-        )}
-        {events.map((ev, i) => (
-          <div key={ev.id} style={{
-            display: "flex", alignItems: "center", gap: 12, padding: "14px 16px", marginBottom: 8,
-            background: `${ev.color}10`, borderRadius: 16, border: `1.5px solid ${ev.color}25`,
-            animation: `slideUp .3s ${i * 0.06}s ease both`,
-          }}>
-            <div style={{ width: 6, height: 40, borderRadius: 3, background: ev.color, flexShrink: 0 }} />
-            <div style={{ flex: 1 }}>
-              <div style={{ fontSize: 15, fontWeight: 700, color: C.textDark, fontFamily: "'Nunito',sans-serif" }}>{ev.emoji} {ev.title}</div>
-              <div style={{ fontSize: 12, fontWeight: 600, color: C.textMid, marginTop: 2 }}>
-                {String(ev.startHour).padStart(2, "0")}:{String(ev.startMin).padStart(2, "0")} – {String(ev.endHour).padStart(2, "0")}:{String(ev.endMin).padStart(2, "0")}
-              </div>
+      )}
+      {events.map((ev, i) => (
+        <div key={ev.id} style={{
+          display: "flex", alignItems: "center", gap: 12, padding: "14px 16px", marginBottom: 8,
+          background: `${ev.color}10`, borderRadius: 16, border: `1.5px solid ${ev.color}25`,
+          animation: `slideUp .3s ${i * 0.06}s ease both`,
+        }}>
+          <div style={{ width: 6, height: 40, borderRadius: 3, background: ev.color, flexShrink: 0 }} />
+          <div style={{ flex: 1 }}>
+            <div style={{ fontSize: 15, fontWeight: 700, color: C.textDark, fontFamily: "'Nunito',sans-serif" }}>{ev.emoji} {ev.title}</div>
+            <div style={{ fontSize: 12, fontWeight: 600, color: C.textMid, marginTop: 2 }}>
+              {String(ev.startHour).padStart(2, "0")}:{String(ev.startMin).padStart(2, "0")} – {String(ev.endHour).padStart(2, "0")}:{String(ev.endMin).padStart(2, "0")}
             </div>
           </div>
-        ))}
-      </div>
-    </div>
+        </div>
+      ))}
+    </BottomSheet>
   );
 }
 
@@ -1144,18 +1235,15 @@ function CouponPage({stars,coupons,onBack,onUse}){
 
       {/* Confirm popup */}
       {found&&(
-        <div onClick={()=>setConfirmId(null)} style={{position:"fixed",inset:0,background:"rgba(45,43,85,.45)",backdropFilter:"blur(6px)",zIndex:1000,display:"flex",alignItems:"center",justifyContent:"center",animation:"fadeIn .2s ease"}}>
-          <div onClick={e=>e.stopPropagation()} style={{width:"85%",maxWidth:320,background:"white",borderRadius:24,padding:"32px 24px 24px",textAlign:"center",animation:"pop .35s cubic-bezier(.22,.68,.36,1.05)"}}>
-            <div style={{fontSize:48,marginBottom:12}}>{found.emoji}</div>
-            <h3 style={{margin:"0 0 8px",fontSize:18,fontWeight:900,color:C.textDark,fontFamily:"'Nunito',sans-serif"}}>쿠폰을 사용할까요?</h3>
-            <p style={{margin:"0 0 6px",fontSize:14,fontWeight:700,color:C.textDark}}>{found.title}</p>
-            <p style={{margin:"0 0 24px",fontSize:13,fontWeight:600,color:C.textMid}}>★ {found.starCost}개의 별이 차감됩니다</p>
-            <div style={{display:"flex",gap:10}}>
-              <button onClick={()=>setConfirmId(null)} style={{flex:1,padding:"12px",borderRadius:14,border:`2px solid ${C.border}`,background:"white",color:C.textMid,fontSize:15,fontWeight:800,fontFamily:"'Nunito',sans-serif",cursor:"pointer"}}>취소</button>
-              <button onClick={confirmUse} style={{flex:1,padding:"12px",borderRadius:14,border:"none",background:`linear-gradient(135deg,${C.primary},${C.primaryLight})`,color:"white",fontSize:15,fontWeight:800,fontFamily:"'Nunito',sans-serif",cursor:"pointer",boxShadow:"0 4px 16px rgba(108,99,255,.35)"}}>사용하기</button>
-            </div>
-          </div>
-        </div>
+        <ConfirmModal
+          emoji={found.emoji}
+          title="쿠폰을 사용할까요?"
+          subtitle={found.title}
+          message={`★ ${found.starCost}개의 별이 차감됩니다`}
+          onCancel={()=>setConfirmId(null)}
+          onConfirm={confirmUse}
+          confirmLabel="사용하기"
+        />
       )}
     </div>
   );
@@ -1246,17 +1334,15 @@ function CouponManagePage({coupons,onBack,onAdd,onDelete,onEdit}){
 
       {/* Delete confirm */}
       {deleteConfirm&&(
-        <div onClick={()=>setDeleteConfirm(null)} style={{position:"fixed",inset:0,background:"rgba(45,43,85,.45)",backdropFilter:"blur(6px)",zIndex:1000,display:"flex",alignItems:"center",justifyContent:"center",animation:"fadeIn .2s ease"}}>
-          <div onClick={e=>e.stopPropagation()} style={{width:"85%",maxWidth:300,background:"white",borderRadius:24,padding:"28px 24px 24px",textAlign:"center",animation:"pop .35s cubic-bezier(.22,.68,.36,1.05)"}}>
-            <div style={{fontSize:40,marginBottom:12}}>🗑️</div>
-            <h3 style={{margin:"0 0 8px",fontSize:17,fontWeight:900,color:C.textDark,fontFamily:"'Nunito',sans-serif"}}>쿠폰을 삭제할까요?</h3>
-            <p style={{margin:"0 0 20px",fontSize:13,fontWeight:600,color:C.textMid}}>삭제하면 아이가 더 이상 사용할 수 없어요.</p>
-            <div style={{display:"flex",gap:10}}>
-              <button onClick={()=>setDeleteConfirm(null)} style={{flex:1,padding:"12px",borderRadius:14,border:`2px solid ${C.border}`,background:"white",color:C.textMid,fontSize:15,fontWeight:800,fontFamily:"'Nunito',sans-serif",cursor:"pointer"}}>취소</button>
-              <button onClick={()=>{onDelete(deleteConfirm);setDeleteConfirm(null);}} style={{flex:1,padding:"12px",borderRadius:14,border:"none",background:`linear-gradient(135deg,${C.secondary},${C.secondaryLight})`,color:"white",fontSize:15,fontWeight:800,fontFamily:"'Nunito',sans-serif",cursor:"pointer",boxShadow:"0 4px 16px rgba(255,101,132,.3)"}}>삭제</button>
-            </div>
-          </div>
-        </div>
+        <ConfirmModal
+          emoji="🗑️"
+          title="쿠폰을 삭제할까요?"
+          message="삭제하면 아이가 더 이상 사용할 수 없어요."
+          onCancel={()=>setDeleteConfirm(null)}
+          onConfirm={()=>{onDelete(deleteConfirm);setDeleteConfirm(null);}}
+          confirmLabel="삭제"
+          confirmColor={C.secondary}
+        />
       )}
 
       {/* Add coupon modal */}
@@ -1284,10 +1370,8 @@ function EditCouponModal({coupon,onClose,onSave}){
   };
 
   return(
-    <div onClick={onClose} style={{position:"fixed",inset:0,background:"rgba(45,43,85,.45)",backdropFilter:"blur(6px)",zIndex:1000,display:"flex",alignItems:"flex-end",justifyContent:"center",animation:"fadeIn .2s ease"}}>
-      <div onClick={e=>e.stopPropagation()} style={{width:"100%",maxWidth:420,background:"white",borderRadius:"28px 28px 0 0",padding:"28px 24px 32px",animation:"slideUp .35s cubic-bezier(.22,.68,.36,1.05)"}}>
-        <div style={{width:40,height:4,borderRadius:2,background:C.border,margin:"0 auto 20px"}}/>
-        <h3 style={{margin:"0 0 20px",fontSize:20,fontWeight:800,color:C.textDark,fontFamily:"'Nunito',sans-serif"}}>✏️ 쿠폰 수정</h3>
+    <BottomSheet onClose={onClose}>
+      <h3 style={{margin:"0 0 20px",fontSize:20,fontWeight:800,color:C.textDark,fontFamily:"'Nunito',sans-serif"}}>✏️ 쿠폰 수정</h3>
 
         <div style={{marginBottom:16}}>
           <div style={{fontSize:13,fontWeight:700,color:C.textMid,marginBottom:8}}>아이콘 선택</div>
@@ -1334,15 +1418,8 @@ function EditCouponModal({coupon,onClose,onSave}){
           }} onFocus={e=>e.target.style.borderColor=C.primary} onBlur={e=>e.target.style.borderColor=C.border}/>
         </div>
 
-        <button onClick={handleSave} disabled={!valid} style={{
-          width:"100%",padding:"14px",borderRadius:16,border:"none",
-          background:valid?`linear-gradient(135deg,${C.primary},${C.primaryLight})`:C.border,
-          color:valid?"white":C.textLight,fontSize:16,fontWeight:800,
-          fontFamily:"'Nunito',sans-serif",cursor:valid?"pointer":"default",
-          boxShadow:valid?"0 4px 16px rgba(108,99,255,.35)":"none",
-        }}>수정 완료 ✏️</button>
-      </div>
-    </div>
+      <button onClick={handleSave} disabled={!valid} style={modalSubmitBtn(valid)}>수정 완료 ✏️</button>
+    </BottomSheet>
   );
 }
 
@@ -1364,10 +1441,8 @@ function AddCouponModal({onClose,onAdd}){
   };
 
   return(
-    <div onClick={onClose} style={{position:"fixed",inset:0,background:"rgba(45,43,85,.45)",backdropFilter:"blur(6px)",zIndex:1000,display:"flex",alignItems:"flex-end",justifyContent:"center",animation:"fadeIn .2s ease"}}>
-      <div onClick={e=>e.stopPropagation()} style={{width:"100%",maxWidth:420,background:"white",borderRadius:"28px 28px 0 0",padding:"28px 24px 32px",animation:"slideUp .35s cubic-bezier(.22,.68,.36,1.05)"}}>
-        <div style={{width:40,height:4,borderRadius:2,background:C.border,margin:"0 auto 20px"}}/>
-        <h3 style={{margin:"0 0 20px",fontSize:20,fontWeight:800,color:C.textDark,fontFamily:"'Nunito',sans-serif"}}>🎫 쿠폰 추가</h3>
+    <BottomSheet onClose={onClose}>
+      <h3 style={{margin:"0 0 20px",fontSize:20,fontWeight:800,color:C.textDark,fontFamily:"'Nunito',sans-serif"}}>🎫 쿠폰 추가</h3>
 
         {/* Emoji picker */}
         <div style={{marginBottom:16}}>
@@ -1430,15 +1505,8 @@ function AddCouponModal({onClose,onAdd}){
           </div>
         )}
 
-        <button onClick={handleAdd} disabled={!valid} style={{
-          width:"100%",padding:"14px",borderRadius:16,border:"none",
-          background:valid?`linear-gradient(135deg,${C.primary},${C.primaryLight})`:C.border,
-          color:valid?"white":C.textLight,fontSize:16,fontWeight:800,
-          fontFamily:"'Nunito',sans-serif",cursor:valid?"pointer":"default",
-          boxShadow:valid?"0 4px 16px rgba(108,99,255,.35)":"none",
-        }}>쿠폰 추가하기</button>
-      </div>
-    </div>
+      <button onClick={handleAdd} disabled={!valid} style={modalSubmitBtn(valid)}>쿠폰 추가하기</button>
+    </BottomSheet>
   );
 }
 
@@ -1473,13 +1541,7 @@ function AuthPage({ onLogin, passwordRecovery, onRecoveryDone }){
   const [signUpRole, setSignUpRole] = useState("부모");
   const [signUpEmoji, setSignUpEmoji] = useState("👩");
 
-  const inputStyle = {
-    width:"100%",padding:"14px 16px",borderRadius:14,
-    border:`2px solid ${C.border}`,fontSize:14,fontWeight:600,
-    fontFamily:"'Nunito',sans-serif",color:C.textDark,
-    outline:"none",background:"white",transition:"border .2s",
-    boxSizing:"border-box",
-  };
+  const authInputStyle={...inputStyle,padding:"14px 16px",background:"white"};
 
   const handleSubmit = async () => {
     setError("");
@@ -1489,13 +1551,7 @@ function AuthPage({ onLogin, passwordRecovery, onRecoveryDone }){
     if(isSignUp && password.length < 6) return setError("비밀번호는 6자 이상이어야 해요");
     setLoading(true);
     if(isSignUp){
-      const { data, error: authError } = await supabase.auth.signUp({
-        email: email.trim(),
-        password,
-        options: {
-          emailRedirectTo: window.location.origin,
-        },
-      });
+      const { data, error: authError } = await authDB.signUp(email.trim(), password, window.location.origin);
       setLoading(false);
       if(authError){
         if(authError.message.includes("already registered")) return setError("이미 가입된 이메일이에요. 로그인해주세요.");
@@ -1518,10 +1574,7 @@ function AuthPage({ onLogin, passwordRecovery, onRecoveryDone }){
       // 이메일 확인이 필요한 경우
       setSignUpDone(true);
     } else {
-      const { error: authError } = await supabase.auth.signInWithPassword({
-        email: email.trim(),
-        password,
-      });
+      const { error: authError } = await authDB.signIn(email.trim(), password);
       setLoading(false);
       if(authError){
         if(authError.message.includes("Invalid login")) return setError("이메일 또는 비밀번호가 맞지 않아요");
@@ -1536,9 +1589,7 @@ function AuthPage({ onLogin, passwordRecovery, onRecoveryDone }){
     if(!email.trim()) return setError("이메일을 입력해주세요");
     if(!/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(email)) return setError("올바른 이메일 형식이 아니에요");
     setLoading(true);
-    const { error: resetError } = await supabase.auth.resetPasswordForEmail(email.trim(), {
-      redirectTo: window.location.origin + '/familyday-app/',
-    });
+    const { error: resetError } = await authDB.resetPassword(email.trim(), window.location.origin + '/familyday-app/');
     setLoading(false);
     if(resetError){
       if(resetError.status===429) return setError("요청이 너무 많아요. 잠시 후 다시 시도해주세요.");
@@ -1553,7 +1604,7 @@ function AuthPage({ onLogin, passwordRecovery, onRecoveryDone }){
     if(newPassword.length < 6) return setError("비밀번호는 6자 이상이어야 해요");
     if(newPassword !== confirmPassword) return setError("비밀번호가 일치하지 않아요");
     setLoading(true);
-    const { error: updateError } = await supabase.auth.updateUser({ password: newPassword });
+    const { error: updateError } = await authDB.updatePassword(newPassword);
     setLoading(false);
     if(updateError){
       if(updateError.status===429) return setError("요청이 너무 많아요. 잠시 후 다시 시도해주세요.");
@@ -1578,17 +1629,17 @@ function AuthPage({ onLogin, passwordRecovery, onRecoveryDone }){
           <p style={{margin:"0 0 20px",fontSize:13,fontWeight:600,color:C.textMid}}>
             새로운 비밀번호를 입력해주세요
           </p>
-          <label style={{fontSize:12,fontWeight:700,color:C.textMid,marginBottom:6,display:"block"}}>새 비밀번호</label>
+          <label style={labelStyle}>새 비밀번호</label>
           <input type="password" value={newPassword} onChange={e=>setNewPassword(e.target.value)}
             placeholder="6자 이상 입력해주세요"
-            style={{...inputStyle,marginBottom:14}}
+            style={{...authInputStyle,marginBottom:14}}
             onFocus={e=>e.target.style.borderColor=C.primary}
             onBlur={e=>e.target.style.borderColor=C.border}
           />
-          <label style={{fontSize:12,fontWeight:700,color:C.textMid,marginBottom:6,display:"block"}}>비밀번호 확인</label>
+          <label style={labelStyle}>비밀번호 확인</label>
           <input type="password" value={confirmPassword} onChange={e=>setConfirmPassword(e.target.value)}
             placeholder="비밀번호를 다시 입력해주세요"
-            style={{...inputStyle,marginBottom:4}}
+            style={{...authInputStyle,marginBottom:4}}
             onFocus={e=>e.target.style.borderColor=C.primary}
             onBlur={e=>e.target.style.borderColor=C.border}
             onKeyDown={e=>e.key==="Enter"&&handleNewPassword()}
@@ -1652,10 +1703,10 @@ function AuthPage({ onLogin, passwordRecovery, onRecoveryDone }){
             <p style={{margin:"0 0 20px",fontSize:13,fontWeight:600,color:C.textMid}}>
               가입한 이메일을 입력하면 재설정 링크를 보내드려요
             </p>
-            <label style={{fontSize:12,fontWeight:700,color:C.textMid,marginBottom:6,display:"block"}}>이메일</label>
+            <label style={labelStyle}>이메일</label>
             <input type="email" value={email} onChange={e=>setEmail(e.target.value)}
               placeholder="example@email.com"
-              style={{...inputStyle,marginBottom:4}}
+              style={{...authInputStyle,marginBottom:4}}
               onFocus={e=>e.target.style.borderColor=C.primary}
               onBlur={e=>e.target.style.borderColor=C.border}
               onKeyDown={e=>e.key==="Enter"&&handleForgotPassword()}
@@ -1724,18 +1775,18 @@ function AuthPage({ onLogin, passwordRecovery, onRecoveryDone }){
           {isSignUp?"이메일과 비밀번호로 가입해요":"이메일과 비밀번호를 입력해주세요"}
         </p>
 
-        <label style={{fontSize:12,fontWeight:700,color:C.textMid,marginBottom:6,display:"block"}}>이메일</label>
+        <label style={labelStyle}>이메일</label>
         <input type="email" value={email} onChange={e=>setEmail(e.target.value)}
           placeholder="example@email.com"
-          style={{...inputStyle,marginBottom:14}}
+          style={{...authInputStyle,marginBottom:14}}
           onFocus={e=>e.target.style.borderColor=C.primary}
           onBlur={e=>e.target.style.borderColor=C.border}
         />
 
-        <label style={{fontSize:12,fontWeight:700,color:C.textMid,marginBottom:6,display:"block"}}>비밀번호</label>
+        <label style={labelStyle}>비밀번호</label>
         <input type="password" value={password} onChange={e=>setPassword(e.target.value)}
           placeholder={isSignUp?"6자 이상 입력해주세요":"비밀번호 입력"}
-          style={{...inputStyle,marginBottom:4}}
+          style={{...authInputStyle,marginBottom:4}}
           onFocus={e=>e.target.style.borderColor=C.primary}
           onBlur={e=>e.target.style.borderColor=C.border}
           onKeyDown={e=>e.key==="Enter"&&handleSubmit()}
@@ -1753,18 +1804,18 @@ function AuthPage({ onLogin, passwordRecovery, onRecoveryDone }){
 
         {isSignUp&&(
           <div style={{marginTop:16,padding:"16px",borderRadius:14,background:C.bg,border:`1.5px solid ${C.border}`}}>
-            <label style={{fontSize:12,fontWeight:700,color:C.textMid,marginBottom:6,display:"block"}}>
+            <label style={labelStyle}>
               초대 코드 <span style={{fontWeight:600,color:C.textLight}}>(선택)</span>
             </label>
             <input value={signUpInviteCode} onChange={e=>setSignUpInviteCode(e.target.value)}
               placeholder="초대 코드가 있으면 입력 (예: FD-A3K9)"
-              style={{...inputStyle,background:"white",marginBottom:signUpInviteCode.trim()?12:0,textTransform:"uppercase",letterSpacing:1}}
+              style={{...authInputStyle,marginBottom:signUpInviteCode.trim()?12:0,textTransform:"uppercase",letterSpacing:1}}
               onFocus={e=>e.target.style.borderColor=C.primary}
               onBlur={e=>e.target.style.borderColor=C.border}
             />
             {signUpInviteCode.trim()&&(
               <div>
-                <label style={{fontSize:12,fontWeight:700,color:C.textMid,marginBottom:6,display:"block"}}>역할</label>
+                <label style={labelStyle}>역할</label>
                 <div style={{display:"flex",gap:6,marginBottom:12,flexWrap:"wrap"}}>
                   {["부모","아이","조부모","반려동물"].map(r=>(
                     <button key={r} onClick={()=>{
@@ -1782,7 +1833,7 @@ function AuthPage({ onLogin, passwordRecovery, onRecoveryDone }){
                     }}>{r}</button>
                   ))}
                 </div>
-                <label style={{fontSize:12,fontWeight:700,color:C.textMid,marginBottom:6,display:"block"}}>아이콘</label>
+                <label style={labelStyle}>아이콘</label>
                 <div style={{display:"flex",gap:6,flexWrap:"wrap"}}>
                   {["👦","👧","👨","👩","👴","👵","🐶","🐱"].map(em=>(
                     <button key={em} onClick={()=>setSignUpEmoji(em)} style={{
@@ -1842,32 +1893,14 @@ function AddMemberModal({ onClose, onAdd }){
     onClose();
   };
 
-  const inputStyle = {
-    width:"100%",padding:"12px 14px",borderRadius:14,
-    border:`2px solid ${C.border}`,fontSize:14,fontWeight:600,
-    fontFamily:"'Nunito',sans-serif",color:C.textDark,
-    outline:"none",background:C.bg,transition:"border .2s",
-    boxSizing:"border-box",
-  };
-
   return(
-    <div onClick={onClose} style={{
-      position:"fixed",inset:0,background:"rgba(45,43,85,.45)",
-      backdropFilter:"blur(6px)",zIndex:1000,display:"flex",
-      alignItems:"flex-end",justifyContent:"center",animation:"fadeIn .2s ease",
-    }}>
-      <div onClick={e=>e.stopPropagation()} style={{
-        width:"100%",maxWidth:420,background:"white",
-        borderRadius:"28px 28px 0 0",padding:"24px 22px 32px",
-        animation:"slideUp .35s cubic-bezier(.22,.68,.36,1.05)",
-      }}>
-        <div style={{width:40,height:4,borderRadius:2,background:C.border,margin:"0 auto 18px"}}/>
-        <h3 style={{margin:"0 0 20px",fontSize:20,fontWeight:800,color:C.textDark,fontFamily:"'Nunito',sans-serif"}}>
-          👨‍👩‍👧 구성원 추가
-        </h3>
+    <BottomSheet onClose={onClose} contentStyle={{padding:"24px 22px 32px"}}>
+      <h3 style={{margin:"0 0 20px",fontSize:20,fontWeight:800,color:C.textDark,fontFamily:"'Nunito',sans-serif"}}>
+        👨‍👩‍👧 구성원 추가
+      </h3>
 
         {/* Name */}
-        <label style={{fontSize:12,fontWeight:700,color:C.textMid,marginBottom:6,display:"block"}}>이름</label>
+        <label style={labelStyle}>이름</label>
         <input ref={inputRef} value={name} onChange={e=>setName(e.target.value)}
           placeholder="예: 다혜"
           style={{...inputStyle,marginBottom:16}}
@@ -1877,7 +1910,7 @@ function AddMemberModal({ onClose, onAdd }){
         />
 
         {/* Role */}
-        <label style={{fontSize:12,fontWeight:700,color:C.textMid,marginBottom:8,display:"block"}}>역할</label>
+        <label style={{...labelStyle,marginBottom:8}}>역할</label>
         <div style={{display:"flex",gap:6,marginBottom:16,flexWrap:"wrap"}}>
           {ROLE_OPTIONS.map(r=>(
             <button key={r} onClick={()=>setRole(r)} style={{
@@ -1891,7 +1924,7 @@ function AddMemberModal({ onClose, onAdd }){
         </div>
 
         {/* Emoji */}
-        <label style={{fontSize:12,fontWeight:700,color:C.textMid,marginBottom:8,display:"block"}}>아이콘</label>
+        <label style={{...labelStyle,marginBottom:8}}>아이콘</label>
         <div style={{display:"flex",gap:8,marginBottom:22,flexWrap:"wrap"}}>
           {MEMBER_EMOJIS.map(em=>(
             <button key={em} onClick={()=>setEmoji(em)} style={{
@@ -1905,19 +1938,8 @@ function AddMemberModal({ onClose, onAdd }){
         </div>
 
         {/* Submit */}
-        <button onClick={handleAdd}
-          disabled={!name.trim()}
-          style={{
-            width:"100%",padding:"14px",borderRadius:16,border:"none",
-            background:name.trim()?`linear-gradient(135deg,${C.primary},${C.primaryLight})`:C.border,
-            color:name.trim()?"white":C.textLight,
-            fontSize:16,fontWeight:800,fontFamily:"'Nunito',sans-serif",
-            cursor:name.trim()?"pointer":"default",
-            boxShadow:name.trim()?"0 4px 16px rgba(108,99,255,.35)":"none",
-            transition:"all .2s",
-          }}>추가하기</button>
-      </div>
-    </div>
+        <button onClick={handleAdd} disabled={!name.trim()} style={modalSubmitBtn(name.trim())}>추가하기</button>
+    </BottomSheet>
   );
 }
 
@@ -1937,7 +1959,7 @@ function MyPage({ user, onUpdate, onLogout, onCouponManage }){
   const generateInvite = async () => {
     const code = "FD-" + Math.random().toString(36).substring(2,6).toUpperCase();
     const expires = new Date(Date.now() + 24*60*60*1000).toISOString();
-    await supabase.from("family_invites").insert({family_id:user.familyId,code,invited_by:user.id,expires_at:expires});
+    await familyDB.createInvite({family_id:user.familyId,code,invited_by:user.id,expires_at:expires});
     setInviteCode(code);
   };
 
@@ -1945,16 +1967,16 @@ function MyPage({ user, onUpdate, onLogout, onCouponManage }){
     setJoinError("");
     if(!joinCode.trim()) return setJoinError("초대 코드를 입력해주세요");
     setJoinLoading(true);
-    const {data:invite}=await supabase.from("family_invites").select("*").eq("code",joinCode.trim().toUpperCase()).is("used_by",null).gt("expires_at",new Date().toISOString()).single();
+    const {data:invite}=await familyDB.getInviteByCode(joinCode.trim().toUpperCase());
     if(!invite){setJoinLoading(false);return setJoinError("유효하지 않거나 만료된 코드예요");}
     // 기존 가족에서 나가기 (본인 멤버 삭제)
-    await supabase.from("family_members").delete().eq("user_id",user.id);
+    await familyDB.deleteMemberByUserId(user.id);
     // 새 가족에 합류
-    await supabase.from("family_members").insert({family_id:invite.family_id,user_id:user.id,name:user.nickname,role:joinRole,emoji:joinEmoji});
+    await familyDB.insertMember({family_id:invite.family_id,user_id:user.id,name:user.nickname,role:joinRole,emoji:joinEmoji});
     // 초대 코드 사용 처리
-    await supabase.from("family_invites").update({used_by:user.id}).eq("id",invite.id);
+    await familyDB.useInvite(invite.id, user.id);
     // 가족 정보 새로고침
-    const {data:members}=await supabase.from("family_members").select("*").eq("family_id",invite.family_id).order("created_at");
+    const {data:members}=await familyDB.getMembersByFamilyId(invite.family_id);
     const updated={...user,familyId:invite.family_id,members:(members||[]).map(m=>({id:m.id,name:m.name,role:m.role,emoji:m.emoji,userId:m.user_id}))};
     onUpdate(updated);
     setJoinLoading(false);
@@ -1963,7 +1985,7 @@ function MyPage({ user, onUpdate, onLogout, onCouponManage }){
   };
 
   const deleteMember = async (memberId) => {
-    await supabase.from("family_members").delete().eq("id",memberId);
+    await familyDB.deleteMemberById(memberId);
     const updated={...user,members:user.members.filter(m=>m.id!==memberId)};
     onUpdate(updated);
   };
@@ -2120,20 +2142,14 @@ function MyPage({ user, onUpdate, onLogout, onCouponManage }){
         <div style={{borderTop:`1px solid ${C.border}`,marginTop:16,paddingTop:16}}>
           {showJoinInput ? (
             <div>
-              <label style={{fontSize:12,fontWeight:700,color:C.textMid,marginBottom:6,display:"block"}}>초대 코드</label>
+              <label style={labelStyle}>초대 코드</label>
               <input value={joinCode} onChange={e=>setJoinCode(e.target.value)}
                 placeholder="초대 코드 입력 (예: FD-A3K9)"
-                style={{
-                  width:"100%",padding:"12px 14px",borderRadius:14,
-                  border:`2px solid ${C.border}`,fontSize:14,fontWeight:600,
-                  fontFamily:"'Nunito',sans-serif",color:C.textDark,
-                  outline:"none",background:C.bg,boxSizing:"border-box",
-                  marginBottom:12,textTransform:"uppercase",letterSpacing:1,
-                }}
+                style={{...inputStyle,marginBottom:12,textTransform:"uppercase",letterSpacing:1}}
                 onFocus={e=>e.target.style.borderColor=C.primary}
                 onBlur={e=>e.target.style.borderColor=C.border}
               />
-              <label style={{fontSize:12,fontWeight:700,color:C.textMid,marginBottom:6,display:"block"}}>역할</label>
+              <label style={labelStyle}>역할</label>
               <div style={{display:"flex",gap:6,marginBottom:12,flexWrap:"wrap"}}>
                 {ROLE_OPTIONS.map(r=>(
                   <button key={r} onClick={()=>{
@@ -2151,7 +2167,7 @@ function MyPage({ user, onUpdate, onLogout, onCouponManage }){
                   }}>{r}</button>
                 ))}
               </div>
-              <label style={{fontSize:12,fontWeight:700,color:C.textMid,marginBottom:6,display:"block"}}>아이콘</label>
+              <label style={labelStyle}>아이콘</label>
               <div style={{display:"flex",gap:8,marginBottom:14,flexWrap:"wrap"}}>
                 {MEMBER_EMOJIS.map(em=>(
                   <button key={em} onClick={()=>setJoinEmoji(em)} style={{
@@ -2221,7 +2237,7 @@ function MyPage({ user, onUpdate, onLogout, onCouponManage }){
         <AddMemberModal
           onClose={()=>setShowAddMember(false)}
           onAdd={async(member)=>{
-            const {data:row}=await supabase.from("family_members").insert({family_id:user.familyId,name:member.name,role:member.role,emoji:member.emoji}).select("id").single();
+            const {data:row}=await familyDB.insertMemberReturningId(user.familyId, member);
             const newMember={...member,id:row?.id||member.id};
             const updated={...user,members:[...user.members,newMember]};
             onUpdate(updated);
@@ -2237,58 +2253,25 @@ function MyPage({ user, onUpdate, onLogout, onCouponManage }){
    ══════════════════════════════════════ */
 export default function FamilyDay() {
   const [calTab,setCalTab]=useState("monthly");
-  const [todos,setTodos]=useState([]);
   const [showModal,setShowModal]=useState(false);
   const [editingTodo,setEditingTodo]=useState(null);
   const [showCoupon,setShowCoupon]=useState(false);
   const [showCouponManage,setShowCouponManage]=useState(false);
-  const [coupons,setCoupons]=useState([]);
-  const [stars,setStars]=useState(0);
-  const [navTab,setNavTab]=useState("home");
-  const [mounted,setMounted]=useState(false);
-  const [events,setEvents]=useState([]);
   const [user,setUser]=useState(null);
   const [authReady,setAuthReady]=useState(false);
   const [dbLoaded,setDbLoaded]=useState(false);
   const [passwordRecovery,setPasswordRecovery]=useState(false);
+  const [stars,setStars]=useState(0);
+  const {todos,setTodos,visibleTodos,momTodos,kidTodos,streak,toggleTodo,deleteTodo,addTodo,editTodo}=useTodoManager(user?.familyId,setStars);
+  const {events,setEvents,addEvent}=useEventManager(user?.familyId);
+  const {coupons,setCoupons,addCoupon,deleteCoupon,editCoupon}=useCouponManager(user?.familyId);
+  const [navTab,setNavTab]=useState("home");
+  const [mounted,setMounted]=useState(false);
   const [todoFilter,setTodoFilter]=useState("all");
   const [showGnb,setShowGnb]=useState(true);
   const [showCalAddModal,setShowCalAddModal]=useState(false);
   const lastScrollY=useRef(0);
   const scrollRef=useRef(null);
-
-  /* ── Supabase: 가족/구성원 로드 ── */
-  async function loadFamily(userId){
-    // 1. 이 유저가 속한 가족 찾기
-    const {data:memberRow}=await supabase.from("family_members").select("family_id").eq("user_id",userId).limit(1).single();
-    let familyId=memberRow?.family_id;
-    // 2. 가족이 없으면: 대기 중인 초대 코드 확인 → 없으면 새 가족 생성
-    if(!familyId){
-      const pendingRaw=localStorage.getItem("fd_pending_invite");
-      if(pendingRaw){
-        const pending=JSON.parse(pendingRaw);
-        localStorage.removeItem("fd_pending_invite");
-        const {data:invite}=await supabase.from("family_invites").select("*").eq("code",pending.code).is("used_by",null).gt("expires_at",new Date().toISOString()).single();
-        if(invite){
-          familyId=invite.family_id;
-          const {data:{user:authUser}}=await supabase.auth.getUser();
-          await supabase.from("family_members").insert({family_id:familyId,user_id:userId,name:authUser.email.split("@")[0],role:pending.role||"부모",emoji:pending.emoji||"👩"});
-          await supabase.from("family_invites").update({used_by:userId}).eq("id",invite.id);
-        }
-      }
-      if(!familyId){
-        // 클라이언트에서 UUID 생성 — RLS SELECT 정책(get_my_family_id)이
-        // family_members 등록 전이라 insert().select() 조회 불가하므로
-        familyId=crypto.randomUUID();
-        await supabase.from("families").insert({id:familyId,name:"우리 가족"});
-        const {data:{user:authUser}}=await supabase.auth.getUser();
-        await supabase.from("family_members").insert({family_id:familyId,user_id:userId,name:authUser.email.split("@")[0],role:"부모",emoji:"👩"});
-      }
-    }
-    // 3. 가족 구성원 목록 조회
-    const {data:members}=await supabase.from("family_members").select("*").eq("family_id",familyId).order("created_at");
-    return {familyId,members:(members||[]).map(m=>({id:m.id,name:m.name,role:m.role,emoji:m.emoji,userId:m.user_id}))};
-  }
 
   /* ── Supabase Auth: 세션 감지 ── */
   useEffect(()=>{
@@ -2323,11 +2306,11 @@ export default function FamilyDay() {
     const tokenHash = params.get("token_hash");
     const type = params.get("type");
     if(tokenHash && type){
-      supabase.auth.verifyOtp({token_hash:tokenHash,type}).then(({error})=>{
+      authDB.verifyOtp({token_hash:tokenHash,type}).then(({error})=>{
         // 인증 처리 후 URL 정리
         window.history.replaceState(null,"",window.location.pathname);
         if(!error){
-          supabase.auth.getSession().then(({data:{session}})=>{
+          authDB.getSession().then(({data:{session}})=>{
             handleSession(session).then(()=>setAuthReady(true));
           });
         } else {
@@ -2335,11 +2318,11 @@ export default function FamilyDay() {
         }
       });
     } else {
-      supabase.auth.getSession().then(({data:{session}})=>{
+      authDB.getSession().then(({data:{session}})=>{
         handleSession(session).then(()=>setAuthReady(true));
       });
     }
-    const {data:{subscription}}=supabase.auth.onAuthStateChange((event,session)=>{
+    const {data:{subscription}}=authDB.onAuthStateChange((event,session)=>{
       if(event==="PASSWORD_RECOVERY"){
         setPasswordRecovery(true);
       }
@@ -2357,12 +2340,7 @@ export default function FamilyDay() {
     if(!user?.familyId) return;
     const fid=user.familyId;
     async function loadAll(){
-      const [todosRes,eventsRes,couponsRes,settingsRes]=await Promise.all([
-        supabase.from("todos").select("*").eq("family_id",fid),
-        supabase.from("events").select("*").eq("family_id",fid),
-        supabase.from("coupons").select("*").eq("family_id",fid),
-        supabase.from("family_settings").select("*").eq("family_id",fid).single(),
-      ]);
+      const [todosRes,eventsRes,couponsRes,settingsRes]=await loadAllFamilyData(fid);
       if(todosRes.data){
         const mapped=todosRes.data.map(r=>({id:r.id,text:r.text,owner:r.owner,isDone:r.is_done,starReward:r.star_reward,createdDate:r.created_date,isWeekly:r.is_weekly,doneDate:r.done_date||undefined}));
         // 주간 리셋 로직
@@ -2377,9 +2355,7 @@ export default function FamilyDay() {
           const newTodos=weeklyTemplates.map(t=>({...t,id:uid(),isDone:false,createdDate:todayKey}));
           setTodos(newTodos);
           // DB에도 새 주간 할 일 저장
-          for(const t of newTodos){
-            supabase.from("todos").insert({id:t.id,text:t.text,owner:t.owner,is_done:false,star_reward:t.starReward,created_date:t.createdDate,is_weekly:t.isWeekly,family_id:fid}).then(()=>{});
-          }
+          for(const t of newTodos){ todoDB.add(t, fid); }
         } else {
           setTodos(mapped);
         }
@@ -2402,64 +2378,21 @@ export default function FamilyDay() {
   useEffect(()=>{
     if(!dbLoaded) return;
     if(!user?.familyId) return;
-    supabase.from("family_settings").upsert({family_id:user.familyId,stars,updated_at:new Date().toISOString()},{onConflict:"family_id"}).then(()=>{});
+    settingsDB.upsertStars(user.familyId, stars);
   },[stars,dbLoaded]);
 
-  const addEvent=useCallback(ev=>{
-    setEvents(p=>[...p,ev]);
-    supabase.from("events").insert({id:ev.id,title:ev.title,date:ev.date,start_hour:ev.startHour,start_min:ev.startMin,end_hour:ev.endHour,end_min:ev.endMin,color:ev.color,emoji:ev.emoji,family_id:user?.familyId}).then(()=>{});
-  },[]);
   const handleLogin=useCallback(u=>{setUser(u);localStorage.setItem("fd_user",JSON.stringify(u));},[]);
   const handleUpdateUser=useCallback(u=>{setUser(u);localStorage.setItem("fd_user",JSON.stringify(u));},[]);
   const handleLogout=useCallback(async()=>{
-    await supabase.auth.signOut();
+    await authDB.signOut();
     setUser(null);
     localStorage.removeItem("fd_user");
   },[]);
 
   useEffect(()=>{requestAnimationFrame(()=>setMounted(true));},[]);
 
-  const toggleTodo=useCallback(id=>{
-    const dk=fmtDateKey(new Date());
-    setTodos(prev=>prev.map(t=>{
-      if(t.id===id&&!t.isDone){
-        setStars(s=>s+t.starReward);
-        const updated={...t,isDone:true,doneDate:dk};
-        supabase.from("todos").update({is_done:true,done_date:dk}).eq("id",id).then(()=>{});
-        return updated;
-      }
-      if(t.id===id&&t.isDone&&t.owner==="mom"){
-        supabase.from("todos").update({is_done:false,done_date:null}).eq("id",id).then(()=>{});
-        return{...t,isDone:false,doneDate:undefined};
-      }
-      return t;
-    }));
-  },[]);
-  const deleteTodo=useCallback(id=>{
-    setTodos(p=>p.filter(t=>t.id!==id));
-    supabase.from("todos").delete().eq("id",id).then(()=>{});
-  },[]);
-  const addTodo=useCallback(item=>{
-    setTodos(p=>[...p,item]);
-    supabase.from("todos").insert({id:item.id,text:item.text,owner:item.owner,is_done:item.isDone||false,star_reward:item.starReward||1,created_date:item.createdDate,is_weekly:item.isWeekly||false,family_id:user?.familyId}).then(()=>{});
-  },[]);
-  const editTodo=useCallback(updated=>{
-    setTodos(p=>p.map(t=>t.id===updated.id?updated:t));
-    supabase.from("todos").update({text:updated.text,owner:updated.owner,star_reward:updated.starReward,is_weekly:updated.isWeekly}).eq("id",updated.id).then(()=>{});
-  },[]);
-
   const today=new Date();
   const todayKey=fmtDateKey(today);
-  const curWeekStart=fmtDateKey(getWeekStartDate(today));
-  // 이번 주 할 일만 표시: 미완료는 유지, 완료는 완료한 날짜에만 표시
-  const visibleTodos=todos.filter(t=>{
-    const todoWeekStart=fmtDateKey(getWeekStartDate(new Date(t.createdDate+"T00:00:00")));
-    if(todoWeekStart!==curWeekStart) return false;
-    if(!t.isDone) return true;
-    return t.doneDate===todayKey;
-  });
-  const momTodos=visibleTodos.filter(t=>t.owner==="mom");
-  const kidTodos=visibleTodos.filter(t=>t.owner==="kid");
   const dateStr=today.toLocaleDateString("ko-KR",{year:"numeric",month:"long",day:"numeric",weekday:"long"});
   const kidName=useMemo(()=>{
     const kid=user?.members?.find(m=>m.role==="아이");
@@ -2467,18 +2400,6 @@ export default function FamilyDay() {
   },[user]);
 
   const spendStars=useCallback(cost=>setStars(s=>Math.max(0,s-cost)),[]);
-  const addCoupon=useCallback(c=>{
-    setCoupons(p=>[...p,c].sort((a,b)=>a.starCost-b.starCost));
-    supabase.from("coupons").insert({id:c.id,star_cost:c.starCost,title:c.title,description:c.desc,emoji:c.emoji,family_id:user?.familyId}).then(()=>{});
-  },[]);
-  const deleteCoupon=useCallback(id=>{
-    setCoupons(p=>p.filter(c=>c.id!==id));
-    supabase.from("coupons").delete().eq("id",id).then(()=>{});
-  },[]);
-  const editCoupon=useCallback(updated=>{
-    setCoupons(p=>p.map(c=>c.id===updated.id?updated:c).sort((a,b)=>a.starCost-b.starCost));
-    supabase.from("coupons").update({star_cost:updated.starCost,title:updated.title,description:updated.desc,emoji:updated.emoji}).eq("id",updated.id).then(()=>{});
-  },[]);
 
   /* ── 스크롤 방향 감지 → GNB 숨김/표시 ── */
   const handleScroll=useCallback(()=>{
@@ -2489,22 +2410,6 @@ export default function FamilyDay() {
     else setShowGnb(true);
     lastScrollY.current=y;
   },[]);
-
-  /* ── 연속 달성 일수 계산 ── */
-  const streak=useMemo(()=>{
-    const kidDone=todos.filter(t=>t.owner==="kid"&&t.isDone&&t.doneDate);
-    const doneDates=[...new Set(kidDone.map(t=>t.doneDate))].sort().reverse();
-    if(doneDates.length===0) return 0;
-    let count=0;
-    const d=new Date();
-    for(let i=0;i<60;i++){
-      const key=fmtDateKey(d);
-      if(doneDates.includes(key)){count++;d.setDate(d.getDate()-1);}
-      else if(i===0){d.setDate(d.getDate()-1);continue;} // 오늘 아직 미완료면 어제부터
-      else break;
-    }
-    return count;
-  },[todos]);
 
   /* Show home tab content vs timeline vs calendar */
   const showHome = navTab === "home" && !showCoupon;
