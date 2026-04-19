@@ -1136,19 +1136,29 @@ function KidDayTimeline({kidName="아이"}) {
 }
 
 /* ════════════ COUPON PAGE (아이용) ════════════ */
-function CouponPage({stars,coupons,onBack,onUse}){
+function CouponPage({stars,coupons,onBack,onUse,userId}){
   const [usedIds,setUsedIds]=useState([]);
   const [confirmId,setConfirmId]=useState(null);
+
+  // 오늘 사용한 쿠폰 기록 로드
+  useEffect(()=>{
+    if(!userId)return;
+    const today=new Date().toISOString().slice(0,10);
+    supabase.from("coupon_usage").select("coupon_id").eq("used_by",userId).gte("used_at",today+"T00:00:00").then(({data})=>{
+      if(data)setUsedIds(data.map(r=>r.coupon_id));
+    });
+  },[userId]);
 
   const handleUse=(coupon)=>{
     if(stars<coupon.starCost)return;
     setConfirmId(coupon.id);
   };
-  const confirmUse=()=>{
+  const confirmUse=async()=>{
     const coupon=coupons.find(c=>c.id===confirmId);
     if(coupon){
       setUsedIds(p=>[...p,confirmId]);
       onUse(coupon.starCost);
+      await supabase.from("coupon_usage").insert({coupon_id:coupon.id,used_by:userId,stars_spent:coupon.starCost});
     }
     setConfirmId(null);
   };
@@ -1250,12 +1260,21 @@ function CouponPage({stars,coupons,onBack,onUse}){
 }
 
 /* ════════════ COUPON MANAGE PAGE (부모용) ════════════ */
-function CouponManagePage({coupons,onBack,onAdd,onDelete,onEdit}){
+function CouponManagePage({coupons,onBack,onAdd,onDelete,onEdit,familyId,members}){
   const [showAddModal,setShowAddModal]=useState(false);
   const [editingCoupon,setEditingCoupon]=useState(null);
   const [deleteConfirm,setDeleteConfirm]=useState(null);
+  const [usageHistory,setUsageHistory]=useState([]);
+
+  useEffect(()=>{
+    if(!familyId)return;
+    supabase.from("coupon_usage").select("*").order("used_at",{ascending:false}).limit(20).then(({data})=>{
+      setUsageHistory(data||[]);
+    });
+  },[familyId]);
 
   return(
+    <div>
     <div style={{animation:"slideUp .4s ease both"}}>
       {/* Header */}
       <div style={{
@@ -1332,7 +1351,32 @@ function CouponManagePage({coupons,onBack,onAdd,onDelete,onEdit}){
         )}
       </div>
 
-      {/* Delete confirm */}
+      {/* 사용 내역 */}
+      {usageHistory.length>0&&(
+        <div style={{background:"white",borderRadius:20,padding:"20px 20px",marginTop:12,boxShadow:"0 4px 20px rgba(108,99,255,.08)"}}>
+          <h3 style={{margin:"0 0 14px",fontSize:16,fontWeight:800,color:C.textDark,fontFamily:"'Nunito',sans-serif",display:"flex",alignItems:"center",gap:8}}>
+            📋 사용 내역
+          </h3>
+          {usageHistory.map((u,i)=>{
+            const coupon=coupons.find(c=>c.id===u.coupon_id);
+            const member=members?.find(m=>m.userId===u.used_by);
+            const date=new Date(u.used_at).toLocaleDateString("ko-KR",{month:"short",day:"numeric",hour:"2-digit",minute:"2-digit"});
+            return(
+              <div key={u.id||i} style={{display:"flex",alignItems:"center",gap:12,padding:"10px 0",borderBottom:i<usageHistory.length-1?`1px solid ${C.border}`:"none"}}>
+                <span style={{fontSize:20}}>{coupon?.emoji||"🎫"}</span>
+                <div style={{flex:1,minWidth:0}}>
+                  <div style={{fontSize:14,fontWeight:700,color:C.textDark}}>{coupon?.title||"삭제된 쿠폰"}</div>
+                  <div style={{fontSize:12,fontWeight:600,color:C.textMid}}>{member?.name||"알 수 없음"} · {date}</div>
+                </div>
+                <span style={{fontSize:13,fontWeight:800,color:"#D4A017"}}>★ {u.stars_spent}</span>
+              </div>
+            );
+          })}
+        </div>
+      )}
+
+      </div>
+      {/* 모달들 — animation div 바깥 (stacking context 회피) */}
       {deleteConfirm&&(
         <ConfirmModal
           emoji="🗑️"
@@ -1344,10 +1388,7 @@ function CouponManagePage({coupons,onBack,onAdd,onDelete,onEdit}){
           confirmColor={C.secondary}
         />
       )}
-
-      {/* Add coupon modal */}
       {showAddModal&&<AddCouponModal onClose={()=>setShowAddModal(false)} onAdd={onAdd}/>}
-      {/* Edit coupon modal */}
       {editingCoupon&&<EditCouponModal coupon={editingCoupon} onClose={()=>setEditingCoupon(null)} onSave={(updated)=>{onEdit(updated);setEditingCoupon(null);}}/>}
     </div>
   );
@@ -1943,10 +1984,103 @@ function AddMemberModal({ onClose, onAdd }){
   );
 }
 
-function MyPage({ user, onUpdate, onLogout, onCouponManage }){
+function EditMemberModal({ member, onClose, onSave }){
+  const [name, setName] = useState(member.name);
+  const [role, setRole] = useState(member.role);
+  const [emoji, setEmoji] = useState(member.emoji);
+  const inputRef = useRef(null);
+
+  useEffect(()=>{setTimeout(()=>inputRef.current?.focus(),150);},[]);
+
+  const handleSave = async () => {
+    if(!name.trim()) return;
+    await supabase.from("family_members").update({name:name.trim(),role,emoji}).eq("id",member.id);
+    onSave({...member, name:name.trim(), role, emoji});
+    onClose();
+  };
+
+  const inputStyle = {
+    width:"100%",padding:"12px 14px",borderRadius:14,
+    border:`2px solid ${C.border}`,fontSize:14,fontWeight:600,
+    fontFamily:"'Nunito',sans-serif",color:C.textDark,
+    outline:"none",background:C.bg,transition:"border .2s",
+    boxSizing:"border-box",
+  };
+
+  return(
+    <div onClick={onClose} style={{
+      position:"fixed",inset:0,background:"rgba(45,43,85,.45)",
+      backdropFilter:"blur(6px)",zIndex:1000,display:"flex",
+      alignItems:"flex-end",justifyContent:"center",animation:"fadeIn .2s ease",
+    }}>
+      <div onClick={e=>e.stopPropagation()} style={{
+        width:"100%",maxWidth:420,background:"white",
+        borderRadius:"28px 28px 0 0",padding:"24px 22px 32px",
+        animation:"slideUp .35s cubic-bezier(.22,.68,.36,1.05)",
+      }}>
+        <div style={{width:40,height:4,borderRadius:2,background:C.border,margin:"0 auto 18px"}}/>
+        <h3 style={{margin:"0 0 20px",fontSize:20,fontWeight:800,color:C.textDark,fontFamily:"'Nunito',sans-serif"}}>
+          ✏️ 구성원 수정
+        </h3>
+
+        <label style={{fontSize:12,fontWeight:700,color:C.textMid,marginBottom:6,display:"block"}}>이름</label>
+        <input ref={inputRef} value={name} onChange={e=>setName(e.target.value)}
+          style={{...inputStyle,marginBottom:16}}
+          onFocus={e=>e.target.style.borderColor=C.primary}
+          onBlur={e=>e.target.style.borderColor=C.border}
+          onKeyDown={e=>e.key==="Enter"&&handleSave()}
+        />
+
+        <label style={{fontSize:12,fontWeight:700,color:C.textMid,marginBottom:8,display:"block"}}>역할</label>
+        <div style={{display:"flex",gap:6,marginBottom:16,flexWrap:"wrap"}}>
+          {ROLE_OPTIONS.map(r=>(
+            <button key={r} onClick={()=>setRole(r)} style={{
+              padding:"7px 16px",borderRadius:999,border:"none",
+              background:role===r?C.primary:`${C.primary}08`,
+              color:role===r?"white":C.textMid,
+              fontSize:13,fontWeight:700,fontFamily:"'Nunito',sans-serif",
+              cursor:"pointer",transition:"all .15s",
+            }}>{r}</button>
+          ))}
+        </div>
+
+        <label style={{fontSize:12,fontWeight:700,color:C.textMid,marginBottom:8,display:"block"}}>아이콘</label>
+        <div style={{display:"flex",gap:8,marginBottom:22,flexWrap:"wrap"}}>
+          {MEMBER_EMOJIS.map(em=>(
+            <button key={em} onClick={()=>setEmoji(em)} style={{
+              width:44,height:44,borderRadius:12,border:"none",
+              background:emoji===em?`${C.primary}15`:C.bg,
+              fontSize:22,cursor:"pointer",transition:"all .15s",
+              outline:emoji===em?`2.5px solid ${C.primary}`:"2px solid transparent",
+              display:"flex",alignItems:"center",justifyContent:"center",
+            }}>{em}</button>
+          ))}
+        </div>
+
+        <button onClick={handleSave}
+          disabled={!name.trim()}
+          style={{
+            width:"100%",padding:"14px",borderRadius:16,border:"none",
+            background:name.trim()?`linear-gradient(135deg,${C.primary},${C.primaryLight})`:C.border,
+            color:name.trim()?"white":C.textLight,
+            fontSize:16,fontWeight:800,fontFamily:"'Nunito',sans-serif",
+            cursor:name.trim()?"pointer":"default",
+            boxShadow:name.trim()?"0 4px 16px rgba(108,99,255,.35)":"none",
+            transition:"all .2s",
+          }}>저장하기</button>
+      </div>
+    </div>
+  );
+}
+
+function MyPage({ user, onUpdate, onLogout, onCouponManage, isParent }){
   const [editingName, setEditingName] = useState(false);
   const [nickname, setNickname] = useState(user.nickname);
   const [showAddMember, setShowAddMember] = useState(false);
+  const [editingMember, setEditingMember] = useState(null);
+  const [deleteConfirmMember, setDeleteConfirmMember] = useState(null);
+  const [editingRole, setEditingRole] = useState(false);
+  const myMember = user.members.find(m=>m.userId===user.id);
   const [inviteCode, setInviteCode] = useState(null);
   const [showJoinInput, setShowJoinInput] = useState(false);
   const [joinCode, setJoinCode] = useState("");
@@ -1988,21 +2122,31 @@ function MyPage({ user, onUpdate, onLogout, onCouponManage }){
     await familyDB.deleteMemberById(memberId);
     const updated={...user,members:user.members.filter(m=>m.id!==memberId)};
     onUpdate(updated);
+    setDeleteConfirmMember(null);
   };
 
   const handlePhotoChange = (e) => {
     const file = e.target.files?.[0];
     if(!file) return;
+    if(file.size>200*1024){
+      alert("사진 크기가 너무 커요. 200KB 이하로 올려주세요.");
+      return;
+    }
     const reader = new FileReader();
     reader.onload = (ev) => {
       onUpdate({...user, photo: ev.target.result});
+      supabase.from("profiles").update({photo_url:ev.target.result}).eq("id",user.id).then(()=>{});
     };
     reader.readAsDataURL(file);
   };
 
   const saveName = () => {
     if(nickname.trim()){
-      onUpdate({...user, nickname: nickname.trim()});
+      const newName=nickname.trim();
+      const updatedMembers=user.members.map(m=>m.userId===user.id?{...m,name:newName}:m);
+      onUpdate({...user, nickname:newName, members:updatedMembers});
+      supabase.from("profiles").update({nickname:newName}).eq("id",user.id).then(()=>{});
+      supabase.from("family_members").update({name:newName}).eq("user_id",user.id).then(()=>{});
     } else {
       setNickname(user.nickname);
     }
@@ -2070,7 +2214,30 @@ function MyPage({ user, onUpdate, onLogout, onCouponManage }){
             </button>
           </div>
         )}
-        <p style={{margin:0,fontSize:13,fontWeight:600,color:C.textMid}}>{user.email}</p>
+        <p style={{margin:"0 0 8px",fontSize:13,fontWeight:600,color:C.textMid}}>{user.email}</p>
+        {editingRole?(
+          <div style={{display:"flex",gap:6,justifyContent:"center",flexWrap:"wrap"}}>
+            {ROLE_OPTIONS.map(r=>(
+              <button key={r} onClick={async()=>{
+                const updatedMembers=user.members.map(m=>m.userId===user.id?{...m,role:r}:m);
+                onUpdate({...user,role:r,members:updatedMembers});
+                await supabase.from("family_members").update({role:r}).eq("user_id",user.id);
+                setEditingRole(false);
+              }} style={{
+                padding:"6px 14px",borderRadius:999,border:"none",
+                background:(myMember?.role||user.role)===r?C.primary:`${C.primary}08`,
+                color:(myMember?.role||user.role)===r?"white":C.textMid,
+                fontSize:12,fontWeight:700,fontFamily:"'Nunito',sans-serif",
+                cursor:"pointer",transition:"all .15s",
+              }}>{r}</button>
+            ))}
+          </div>
+        ):(
+          <div onClick={()=>setEditingRole(true)} style={{display:"inline-flex",alignItems:"center",gap:4,cursor:"pointer",padding:"4px 12px",borderRadius:999,background:`${C.primary}08`}}>
+            <span style={{fontSize:13,fontWeight:700,color:C.primary}}>{myMember?.role||user.role}</span>
+            <svg width="10" height="10" viewBox="0 0 24 24" fill="none"><path d="M15.232 5.232l3.536 3.536M7 17H4v-3L16.5 1.5a2.121 2.121 0 013 3L7 17z" stroke={C.primary} strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round"/></svg>
+          </div>
+        )}
       </div>
 
       {/* Family members */}
@@ -2082,7 +2249,8 @@ function MyPage({ user, onUpdate, onLogout, onCouponManage }){
           <div key={m.id} style={{
             display:"flex",alignItems:"center",gap:14,padding:"12px 0",
             borderBottom:i<user.members.length-1?`1px solid ${C.border}`:"none",
-          }}>
+            cursor:isParent&&m.userId!==user.id?"pointer":"default",
+          }} onClick={()=>{if(isParent&&m.userId!==user.id)setEditingMember(m);}}>
             <div style={{
               width:42,height:42,borderRadius:"50%",
               background:`linear-gradient(135deg,${C.primaryLight}30,${C.primary}15)`,
@@ -2092,14 +2260,14 @@ function MyPage({ user, onUpdate, onLogout, onCouponManage }){
               <div style={{fontSize:15,fontWeight:700,color:C.textDark,fontFamily:"'Nunito',sans-serif"}}>{m.name}</div>
               <div style={{fontSize:12,fontWeight:600,color:C.textMid}}>{m.role}</div>
             </div>
-            {m.userId!==user.id&&(
-              <button onClick={()=>deleteMember(m.id)} style={{
+            {isParent&&m.userId!==user.id&&(
+              <button onClick={(e)=>{e.stopPropagation();setDeleteConfirmMember(m);}} style={{
                 background:"none",border:"none",cursor:"pointer",padding:6,color:C.textLight,fontSize:16,
               }}>✕</button>
             )}
           </div>
         ))}
-        <button onClick={()=>setShowAddMember(true)} style={{
+        {isParent&&<button onClick={()=>setShowAddMember(true)} style={{
           width:"100%",padding:"12px",borderRadius:14,border:`2px dashed ${C.border}`,
           background:"transparent",color:C.textMid,fontSize:14,fontWeight:700,
           fontFamily:"'Nunito',sans-serif",cursor:"pointer",marginTop:12,
@@ -2107,7 +2275,7 @@ function MyPage({ user, onUpdate, onLogout, onCouponManage }){
         }}
           onMouseEnter={e=>{e.currentTarget.style.borderColor=C.primary;e.currentTarget.style.color=C.primary;}}
           onMouseLeave={e=>{e.currentTarget.style.borderColor=C.border;e.currentTarget.style.color=C.textMid;}}
-        >+ 구성원 추가</button>
+        >+ 구성원 추가</button>}
       </div>
 
       {/* 초대 코드 */}
@@ -2116,7 +2284,7 @@ function MyPage({ user, onUpdate, onLogout, onCouponManage }){
           🔗 가족 초대
         </h3>
 
-        {inviteCode ? (
+        {isParent&&(inviteCode ? (
           <div style={{textAlign:"center",padding:"12px 0"}}>
             <div style={{fontSize:13,fontWeight:600,color:C.textMid,marginBottom:8}}>초대 코드 (24시간 유효)</div>
             <div style={{fontSize:28,fontWeight:900,color:C.primary,fontFamily:"'Nunito',sans-serif",letterSpacing:2,marginBottom:12}}>{inviteCode}</div>
@@ -2137,7 +2305,7 @@ function MyPage({ user, onUpdate, onLogout, onCouponManage }){
             onMouseEnter={e=>e.currentTarget.style.transform="scale(1.02)"}
             onMouseLeave={e=>e.currentTarget.style.transform="scale(1)"}
           >초대 코드 생성</button>
-        )}
+        ))}
 
         <div style={{borderTop:`1px solid ${C.border}`,marginTop:16,paddingTop:16}}>
           {showJoinInput ? (
@@ -2208,8 +2376,8 @@ function MyPage({ user, onUpdate, onLogout, onCouponManage }){
         </div>
       </div>
 
-      {/* Coupon manage */}
-      <div onClick={onCouponManage} style={{
+      {/* Coupon manage (부모 전용) */}
+      {isParent&&<div onClick={onCouponManage} style={{
         background:"white",borderRadius:20,padding:"16px 20px",marginBottom:16,
         boxShadow:"0 4px 20px rgba(108,99,255,.08)",
         display:"flex",alignItems:"center",gap:14,cursor:"pointer",transition:"transform .2s",
@@ -2221,7 +2389,7 @@ function MyPage({ user, onUpdate, onLogout, onCouponManage }){
           <div style={{fontSize:12,fontWeight:600,color:C.textMid,marginTop:2}}>아이 보상 쿠폰 추가 · 삭제</div>
         </div>
         <svg width="18" height="18" viewBox="0 0 24 24" fill="none" style={{flexShrink:0}}><path d="M9 5L16 12L9 19" stroke={C.textLight} strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round"/></svg>
-      </div>
+      </div>}
 
       {/* Logout */}
       <button onClick={onLogout} style={{
@@ -2243,6 +2411,53 @@ function MyPage({ user, onUpdate, onLogout, onCouponManage }){
             onUpdate(updated);
           }}
         />
+      )}
+
+      {editingMember&&(
+        <EditMemberModal
+          member={editingMember}
+          onClose={()=>setEditingMember(null)}
+          onSave={(updatedMember)=>{
+            const updated={...user,members:user.members.map(m=>m.id===updatedMember.id?updatedMember:m)};
+            onUpdate(updated);
+            setEditingMember(null);
+          }}
+        />
+      )}
+
+      {deleteConfirmMember&&(
+        <div onClick={()=>setDeleteConfirmMember(null)} style={{
+          position:"fixed",inset:0,background:"rgba(45,43,85,.45)",
+          backdropFilter:"blur(6px)",zIndex:1000,display:"flex",
+          alignItems:"center",justifyContent:"center",animation:"fadeIn .2s ease",
+          padding:20,
+        }}>
+          <div onClick={e=>e.stopPropagation()} style={{
+            width:"100%",maxWidth:340,background:"white",borderRadius:24,
+            padding:"28px 24px",textAlign:"center",
+            animation:"slideUp .3s cubic-bezier(.22,.68,.36,1.05)",
+          }}>
+            <div style={{fontSize:36,marginBottom:12}}>{deleteConfirmMember.emoji}</div>
+            <div style={{fontSize:16,fontWeight:800,color:C.textDark,fontFamily:"'Nunito',sans-serif",marginBottom:6}}>
+              {deleteConfirmMember.name}
+            </div>
+            <div style={{fontSize:14,fontWeight:600,color:C.textMid,marginBottom:24}}>
+              이 구성원을 삭제할까요?
+            </div>
+            <div style={{display:"flex",gap:10}}>
+              <button onClick={()=>setDeleteConfirmMember(null)} style={{
+                flex:1,padding:"12px",borderRadius:14,border:`2px solid ${C.border}`,
+                background:"white",color:C.textMid,fontSize:15,fontWeight:700,
+                fontFamily:"'Nunito',sans-serif",cursor:"pointer",
+              }}>취소</button>
+              <button onClick={()=>deleteMember(deleteConfirmMember.id)} style={{
+                flex:1,padding:"12px",borderRadius:14,border:"none",
+                background:C.secondary,color:"white",fontSize:15,fontWeight:700,
+                fontFamily:"'Nunito',sans-serif",cursor:"pointer",
+              }}>삭제</button>
+            </div>
+          </div>
+        </div>
       )}
     </div>
   );
@@ -2273,6 +2488,41 @@ export default function FamilyDay() {
   const lastScrollY=useRef(0);
   const scrollRef=useRef(null);
 
+  /* ── Supabase: 가족/구성원 로드 ── */
+  async function loadFamily(userId){
+    // 1. 이 유저가 속한 가족 찾기
+    const {data:memberRow}=await supabase.from("family_members").select("family_id").eq("user_id",userId).limit(1).single();
+    let familyId=memberRow?.family_id;
+    // 2. 가족이 없으면: 대기 중인 초대 코드 확인 → 없으면 새 가족 생성
+    if(!familyId){
+      const pendingRaw=localStorage.getItem("fd_pending_invite");
+      if(pendingRaw){
+        const pending=JSON.parse(pendingRaw);
+        localStorage.removeItem("fd_pending_invite");
+        const {data:invite}=await supabase.from("family_invites").select("*").eq("code",pending.code).is("used_by",null).gt("expires_at",new Date().toISOString()).single();
+        if(invite){
+          familyId=invite.family_id;
+          const {data:{user:authUser}}=await supabase.auth.getUser();
+          await supabase.from("family_members").insert({family_id:familyId,user_id:userId,name:authUser.email.split("@")[0],role:pending.role||"부모",emoji:pending.emoji||"👩"});
+          await supabase.from("family_invites").update({used_by:userId}).eq("id",invite.id);
+        }
+      }
+      if(!familyId){
+        // 클라이언트에서 UUID 생성 — RLS SELECT 정책(get_my_family_id)이
+        // family_members 등록 전이라 insert().select() 조회 불가하므로
+        familyId=crypto.randomUUID();
+        await supabase.from("families").insert({id:familyId,name:"우리 가족"});
+        const {data:{user:authUser}}=await supabase.auth.getUser();
+        await supabase.from("family_members").insert({family_id:familyId,user_id:userId,name:authUser.email.split("@")[0],role:"부모",emoji:"👩"});
+      }
+    }
+    // 3. 가족 구성원 목록 조회
+    const {data:members}=await supabase.from("family_members").select("*").eq("family_id",familyId).order("created_at");
+    const memberList=(members||[]).map(m=>({id:m.id,name:m.name,role:m.role,emoji:m.emoji,userId:m.user_id}));
+    const myMember=memberList.find(m=>m.userId===userId);
+    return {familyId,members:memberList,role:myMember?.role||"부모"};
+  }
+
   /* ── Supabase Auth: 세션 감지 ── */
   useEffect(()=>{
     async function handleSession(session){
@@ -2281,14 +2531,23 @@ export default function FamilyDay() {
         const stored=localStorage.getItem("fd_user");
         const prev=stored?JSON.parse(stored):null;
         try{
-          const {familyId,members}=await loadFamily(u.id);
+          const {familyId,members,role}=await loadFamily(u.id);
+          // 프로필 DB에서 읽기 (localStorage보다 우선)
+          const {data:profile}=await supabase.from("profiles").select("*").eq("id",u.id).single();
+          const nickname=profile?.nickname||prev?.nickname||u.email.split("@")[0];
+          const photo=profile?.photo_url||prev?.photo||null;
+          // 프로필이 없으면 생성
+          if(!profile){
+            await supabase.from("profiles").upsert({id:u.id,nickname,photo_url:photo},{onConflict:"id"});
+          }
           const merged={
             id:u.id,
             email:u.email,
-            nickname:prev?.nickname||u.email.split("@")[0],
-            photo:prev?.photo||null,
+            nickname,
+            photo,
             familyId,
             members,
+            role,
           };
           setUser(merged);
           localStorage.setItem("fd_user",JSON.stringify(merged));
@@ -2398,6 +2657,7 @@ export default function FamilyDay() {
     const kid=user?.members?.find(m=>m.role==="아이");
     return kid?.name||"아이";
   },[user]);
+  const isParent=useMemo(()=>user?.role==="부모"||user?.role==="조부모",[user]);
 
   const spendStars=useCallback(cost=>setStars(s=>Math.max(0,s-cost)),[]);
 
@@ -2531,7 +2791,7 @@ export default function FamilyDay() {
 
         {/* ═══ COUPON PAGE ═══ */}
         {navTab==="home"&&showCoupon&&(
-          <CouponPage stars={stars} coupons={coupons} onBack={()=>setShowCoupon(false)} onUse={spendStars}/>
+          <CouponPage stars={stars} coupons={coupons} onBack={()=>setShowCoupon(false)} onUse={spendStars} userId={user?.id}/>
         )}
 
         {/* ═══ TIMELINE ═══ */}
@@ -2576,11 +2836,11 @@ export default function FamilyDay() {
         {/* ═══ FAMILY ═══ */}
         {navTab==="family"&&!showCouponManage&&(
           user
-            ? <MyPage user={user} onUpdate={handleUpdateUser} onLogout={handleLogout} onCouponManage={()=>setShowCouponManage(true)}/>
+            ? <MyPage user={user} onUpdate={handleUpdateUser} onLogout={handleLogout} onCouponManage={()=>setShowCouponManage(true)} isParent={isParent}/>
             : <AuthPage onLogin={handleLogin} passwordRecovery={passwordRecovery} onRecoveryDone={()=>setPasswordRecovery(false)}/>
         )}
         {navTab==="family"&&showCouponManage&&(
-          <CouponManagePage coupons={coupons} onBack={()=>setShowCouponManage(false)} onAdd={addCoupon} onDelete={deleteCoupon} onEdit={editCoupon}/>
+          <CouponManagePage coupons={coupons} onBack={()=>setShowCouponManage(false)} onAdd={addCoupon} onDelete={deleteCoupon} onEdit={editCoupon} familyId={user?.familyId} members={user?.members}/>
         )}
       </div>
 

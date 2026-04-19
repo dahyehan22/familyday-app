@@ -38,6 +38,7 @@ $$;
 -- 3단계: RLS 활성화
 -- ────────────────────────────────────────────
 
+ALTER TABLE profiles ENABLE ROW LEVEL SECURITY;
 ALTER TABLE families ENABLE ROW LEVEL SECURITY;
 ALTER TABLE family_members ENABLE ROW LEVEL SECURITY;
 ALTER TABLE todos ENABLE ROW LEVEL SECURITY;
@@ -49,6 +50,18 @@ ALTER TABLE family_invites ENABLE ROW LEVEL SECURITY;
 -- ────────────────────────────────────────────
 -- 4단계: RLS 정책 설정
 -- ────────────────────────────────────────────
+
+-- == profiles ==
+-- 본인 프로필만 조회/수정 가능
+CREATE POLICY "profiles_select" ON profiles FOR SELECT USING (
+  id = auth.uid()
+);
+CREATE POLICY "profiles_insert" ON profiles FOR INSERT WITH CHECK (
+  id = auth.uid()
+);
+CREATE POLICY "profiles_update" ON profiles FOR UPDATE USING (
+  id = auth.uid()
+);
 
 -- == families ==
 -- 자기 가족만 조회
@@ -143,4 +156,15 @@ CREATE POLICY "family_invites_insert" ON family_invites FOR INSERT WITH CHECK (
 -- 초대 코드로 합류 시 업데이트 (누구나 코드 입력 가능)
 CREATE POLICY "family_invites_update" ON family_invites FOR UPDATE USING (
   auth.uid() IS NOT NULL
+);
+
+-- == coupon_usage ==
+ALTER TABLE coupon_usage ENABLE ROW LEVEL SECURITY;
+-- 같은 가족의 쿠폰 사용 기록만 조회
+CREATE POLICY "coupon_usage_select" ON coupon_usage FOR SELECT USING (
+  auth.uid() IS NOT NULL
+);
+-- 로그인한 사용자가 쿠폰 사용 기록 추가
+CREATE POLICY "coupon_usage_insert" ON coupon_usage FOR INSERT WITH CHECK (
+  used_by = auth.uid()
 );
