@@ -64,7 +64,9 @@ export async function loadFamily(userId) {
     }
   }
   const {data:members} = await familyDB.getMembersByFamilyId(familyId);
-  return {familyId, members:(members||[]).map(m=>({id:m.id,name:m.name,role:m.role,emoji:m.emoji,userId:m.user_id}))};
+  const memberList=(members||[]).map(m=>({id:m.id,name:m.name,role:m.role,emoji:m.emoji,userId:m.user_id}));
+  const myMember=memberList.find(m=>m.userId===userId);
+  return {familyId, members:memberList, role:myMember?.role||"부모"};
 }
 
 // ─── DATA LOAD ───

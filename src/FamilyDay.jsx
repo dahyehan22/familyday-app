@@ -1,5 +1,5 @@
 import React, { useState, useEffect, useCallback, useRef, useMemo } from "react";
-import { authDB, familyDB, loadFamily, loadAllFamilyData, todoDB, eventDB, couponDB, settingsDB } from "./supabaseClient";
+import { supabase, authDB, familyDB, loadFamily, loadAllFamilyData, todoDB, eventDB, couponDB, settingsDB } from "./supabaseClient";
 
 /* ─── colour tokens ─── */
 const C = {
@@ -2487,41 +2487,6 @@ export default function FamilyDay() {
   const [showCalAddModal,setShowCalAddModal]=useState(false);
   const lastScrollY=useRef(0);
   const scrollRef=useRef(null);
-
-  /* ── Supabase: 가족/구성원 로드 ── */
-  async function loadFamily(userId){
-    // 1. 이 유저가 속한 가족 찾기
-    const {data:memberRow}=await supabase.from("family_members").select("family_id").eq("user_id",userId).limit(1).single();
-    let familyId=memberRow?.family_id;
-    // 2. 가족이 없으면: 대기 중인 초대 코드 확인 → 없으면 새 가족 생성
-    if(!familyId){
-      const pendingRaw=localStorage.getItem("fd_pending_invite");
-      if(pendingRaw){
-        const pending=JSON.parse(pendingRaw);
-        localStorage.removeItem("fd_pending_invite");
-        const {data:invite}=await supabase.from("family_invites").select("*").eq("code",pending.code).is("used_by",null).gt("expires_at",new Date().toISOString()).single();
-        if(invite){
-          familyId=invite.family_id;
-          const {data:{user:authUser}}=await supabase.auth.getUser();
-          await supabase.from("family_members").insert({family_id:familyId,user_id:userId,name:authUser.email.split("@")[0],role:pending.role||"부모",emoji:pending.emoji||"👩"});
-          await supabase.from("family_invites").update({used_by:userId}).eq("id",invite.id);
-        }
-      }
-      if(!familyId){
-        // 클라이언트에서 UUID 생성 — RLS SELECT 정책(get_my_family_id)이
-        // family_members 등록 전이라 insert().select() 조회 불가하므로
-        familyId=crypto.randomUUID();
-        await supabase.from("families").insert({id:familyId,name:"우리 가족"});
-        const {data:{user:authUser}}=await supabase.auth.getUser();
-        await supabase.from("family_members").insert({family_id:familyId,user_id:userId,name:authUser.email.split("@")[0],role:"부모",emoji:"👩"});
-      }
-    }
-    // 3. 가족 구성원 목록 조회
-    const {data:members}=await supabase.from("family_members").select("*").eq("family_id",familyId).order("created_at");
-    const memberList=(members||[]).map(m=>({id:m.id,name:m.name,role:m.role,emoji:m.emoji,userId:m.user_id}));
-    const myMember=memberList.find(m=>m.userId===userId);
-    return {familyId,members:memberList,role:myMember?.role||"부모"};
-  }
 
   /* ── Supabase Auth: 세션 감지 ── */
   useEffect(()=>{
