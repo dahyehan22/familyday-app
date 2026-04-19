@@ -2135,7 +2135,7 @@ function MyPage({ user, onUpdate, onLogout, onCouponManage, isParent }){
     const reader = new FileReader();
     reader.onload = (ev) => {
       onUpdate({...user, photo: ev.target.result});
-      supabase.from("profiles").update({photo_url:ev.target.result}).eq("id",user.id).then(()=>{});
+      supabase.from("profiles").upsert({id:user.id,photo_url:ev.target.result},{onConflict:"id"}).then(()=>{});
     };
     reader.readAsDataURL(file);
   };
@@ -2145,7 +2145,7 @@ function MyPage({ user, onUpdate, onLogout, onCouponManage, isParent }){
       const newName=nickname.trim();
       const updatedMembers=user.members.map(m=>m.userId===user.id?{...m,name:newName}:m);
       onUpdate({...user, nickname:newName, members:updatedMembers});
-      supabase.from("profiles").update({nickname:newName}).eq("id",user.id).then(()=>{});
+      supabase.from("profiles").upsert({id:user.id,nickname:newName},{onConflict:"id"}).then(()=>{});
       supabase.from("family_members").update({name:newName}).eq("user_id",user.id).then(()=>{});
     } else {
       setNickname(user.nickname);

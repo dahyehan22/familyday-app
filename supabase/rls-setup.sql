@@ -82,6 +82,10 @@ CREATE POLICY "family_members_select" ON family_members FOR SELECT USING (
 CREATE POLICY "family_members_insert" ON family_members FOR INSERT WITH CHECK (
   auth.uid() IS NOT NULL
 );
+-- 같은 가족 구성원 수정
+CREATE POLICY "family_members_update" ON family_members FOR UPDATE USING (
+  family_id = get_my_family_id()
+);
 -- 같은 가족 구성원만 삭제
 CREATE POLICY "family_members_delete" ON family_members FOR DELETE USING (
   family_id = get_my_family_id()
