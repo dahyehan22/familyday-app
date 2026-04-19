@@ -132,9 +132,9 @@ CREATE POLICY "family_settings_update" ON family_settings FOR UPDATE USING (
 );
 
 -- == family_invites ==
--- 같은 가족의 초대만 조회
+-- 로그인한 사용자는 초대 코드 조회 가능 (다른 가족 합류를 위해 필요)
 CREATE POLICY "family_invites_select" ON family_invites FOR SELECT USING (
-  family_id = get_my_family_id()
+  auth.uid() IS NOT NULL
 );
 -- 자기 가족에서만 초대 생성
 CREATE POLICY "family_invites_insert" ON family_invites FOR INSERT WITH CHECK (
